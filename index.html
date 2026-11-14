@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090d16">
+  <meta name="description" content="La Team Basket — média indépendant francophone consacré à l'actualité NBA, aux scores et aux statistiques.">
+  <title>La Team Basket — L'actu NBA, au quotidien</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-theme="dark">
+  <div class="ticker-shell">
+    <div class="ticker-top">
+      <div class="ticker-switch" role="group" aria-label="Type de matchs">
+        <button class="ticker-tab active" data-ticker="results">Matchs de la nuit</button>
+        <button class="ticker-tab" data-ticker="upcoming">Prochains matchs <span aria-hidden="true">→</span></button>
+      </div>
+      <div class="ticker-status"><span class="live-dot"></span><span id="refresh-label">Démo · actualisation dans 05:00</span><button id="refresh-btn" aria-label="Actualiser">↻</button></div>
+    </div>
+    <div class="ticker-line">
+      <button class="ticker-arrow" id="ticker-prev" aria-label="Défiler à gauche">‹</button>
+      <div class="ticker-track" id="ticker-track" tabindex="0" aria-label="Scores et prochains matchs"></div>
+      <button class="ticker-arrow" id="ticker-next" aria-label="Défiler à droite">›</button>
+    </div>
+  </div>
+
+  <header class="site-header">
+    <a class="brand" href="#" aria-label="La Team Basket, accueil"><img class="brand-logo brand-logo-dark" src="logo-dark.svg" alt="La Team Basket"><img class="brand-logo brand-logo-light" src="logo-light.svg" alt="" aria-hidden="true"></a>
+    <nav class="main-nav" aria-label="Navigation principale">
+      <button class="nav-link active" data-page="home">À la une</button>
+      <button class="nav-link" data-page="calendar">Calendrier</button>
+      <button class="nav-link" data-page="teams">Équipes</button>
+      <button class="nav-link" data-page="stats">Statistiques</button>
+      <button class="nav-link" data-page="standings">Classement</button>
+      <button class="nav-link" data-page="playoffs">Playoffs</button>
+    </nav>
+    <button class="theme-toggle" id="theme-toggle" aria-label="Passer en mode clair"><span class="theme-icon">☼</span><span class="theme-label">Mode clair</span></button>
+    <button class="mobile-menu" id="mobile-menu" aria-label="Ouvrir le menu">☰</button>
+  </header>
+
+  <main class="container">
+    <div class="demo-notice"><span>MODE APERÇU</span> Les données affichées sont des exemples de mise en page, pas des scores NBA en direct. Le branchement API sera ajouté dans une prochaine étape.</div>
+
+    <section class="page active" id="page-home">
+      <div class="section-heading"><div><p class="eyebrow">SAMEDI 14 NOVEMBRE 2026 · ÉDITION DU JOUR</p><h1>Le basket, <em>sans détour.</em></h1><p class="section-subtitle">Toute l'actualité NBA, les résultats et les performances à ne pas manquer.</p></div><span class="edition-pill">ÉDITION DU MATIN</span></div>
+      <div class="hero-grid">
+        <section class="panel score-panel"><div class="panel-heading"><div><span class="eyebrow">LES RÉSULTATS</span><h2>La nuit en scores</h2></div><button class="text-button" data-goto="calendar">Tout voir →</button></div><div id="home-scores" class="score-list"></div></section>
+        <article class="feature-card"><div class="feature-kicker">LE RÉCAP' DE LA NUIT <span>✦</span></div><div class="feature-content"><span class="tag">À LA UNE</span><h2>Une nouvelle nuit pleine de promesses sur les parquets NBA</h2><p>Les affiches se suivent et les performances individuelles continuent de faire vibrer la ligue. Retrouvez ici le fil des temps forts, les tendances et les joueurs à suivre.</p><button class="primary-button" id="read-feature">Lire le récap' <span>↗</span></button></div><div class="feature-orbit" aria-hidden="true"><span>NBA</span></div></article>
+      </div>
+      <div class="content-layout">
+        <div class="main-column">
+          <section class="content-section"><div class="section-title-row"><div><p class="eyebrow">FRENCH CONNECTION</p><h2>Le baromètre des Français</h2></div><span class="subtle-label">PERFORMANCES · EXEMPLE</span></div><div class="french-grid" id="french-performances"></div></section>
+          <section class="content-section"><div class="section-title-row"><div><p class="eyebrow">LE FIL NBA</p><h2>Dernières actualités</h2></div><button class="text-button" id="all-news">Toutes les actus →</button></div><div class="news-grid" id="news-grid"></div></section>
+        </div>
+        <aside class="sidebar panel"><div class="panel-heading"><div><p class="eyebrow">LES INDIVIDUALITÉS</p><h2>🔥 Top stats de la nuit</h2></div><span class="mini-live">APERÇU</span></div><div id="top-performances" class="top-list"></div><button class="outline-button full" data-goto="stats">Voir les leaders →</button></aside>
+      </div>
+    </section>
+
+    <section class="page" id="page-calendar">
+      <div class="page-heading"><div><p class="eyebrow">SAISON NBA 2026-27</p><h1>Le calendrier</h1><p class="section-subtitle">Les résultats et les prochaines affiches, à l'heure française.</p></div><select id="calendar-filter" class="select-control" aria-label="Filtrer les matchs"><option value="all">Tous les matchs</option><option value="played">Matchs terminés</option><option value="upcoming">Matchs à venir</option></select></div>
+      <div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>Date / heure (FR)</th><th>Rencontre</th><th>Score / statut</th><th>Meilleur marqueur</th><th></th></tr></thead><tbody id="calendar-body"></tbody></table></div></div>
+    </section>
+
+    <section class="page" id="page-teams">
+      <div class="page-heading"><div><p class="eyebrow">LES 30 FRANCHISES</p><h1>Les équipes</h1><p class="section-subtitle">Explore les franchises et leurs effectifs.</p></div><input id="team-search" class="search-control" type="search" placeholder="Rechercher une équipe…" aria-label="Rechercher une équipe"></div>
+      <div id="team-detail" hidden></div><div class="team-grid" id="team-grid"></div>
+    </section>
+
+    <section class="page" id="page-stats">
+      <div class="page-heading"><div><p class="eyebrow">SAISON RÉGULIÈRE · 2026-27</p><h1>Les statistiques</h1><p class="section-subtitle">Les leaders par catégorie, sur une base de démonstration.</p></div><span class="edition-pill">TOP 5</span></div>
+      <div class="leaders-grid" id="leaders-grid"></div>
+    </section>
+
+    <section class="page" id="page-standings">
+      <div class="page-heading"><div><p class="eyebrow">SAISON RÉGULIÈRE · 2026-27</p><h1>Le classement</h1><p class="section-subtitle">La course aux playoffs, conférence par conférence.</p></div></div>
+      <div class="standings-grid"><section class="panel table-panel"><div class="panel-heading"><h2>Conférence Est</h2><span class="conference-dot east"></span></div><div class="table-wrap"><table><thead><tr><th>#</th><th>Équipe</th><th>V</th><th>D</th><th>%</th><th>Série</th></tr></thead><tbody id="east-body"></tbody></table></div></section><section class="panel table-panel"><div class="panel-heading"><h2>Conférence Ouest</h2><span class="conference-dot west"></span></div><div class="table-wrap"><table><thead><tr><th>#</th><th>Équipe</th><th>V</th><th>D</th><th>%</th><th>Série</th></tr></thead><tbody id="west-body"></tbody></table></div></section></div>
+    </section>
+
+    <section class="page" id="page-playoffs">
+      <div class="page-heading"><div><p class="eyebrow">HISTOIRE DE LA NBA</p><h1>Les Playoffs</h1><p class="section-subtitle">Revisite les tableaux et les séries éliminatoires.</p></div><select id="playoff-year" class="select-control" aria-label="Choisir l'année des playoffs"></select></div>
+      <div class="bracket-intro"><span class="tag">TABLEAU HISTORIQUE</span><p>La structure ci-dessous est une maquette de présentation. Les tableaux historiques vérifiés seront connectés à la source de données.</p></div>
+      <div class="bracket" id="bracket"></div><section class="content-section"><div class="section-title-row"><div><p class="eyebrow">SÉRIES</p><h2>Détail des confrontations</h2></div></div><div id="series-detail" class="series-list"></div></section>
+    </section>
+  </main>
+
+  <footer class="site-footer"><div class="footer-inner"><div class="footer-brand"><a class="brand" href="#" aria-label="La Team Basket"><img class="brand-logo brand-logo-dark" src="logo-dark.svg" alt=""><img class="brand-logo brand-logo-light" src="logo-light.svg" alt="" aria-hidden="true"></a><p>Le média indépendant des passionnés NBA.</p></div><div class="legal-box"><h3>Mentions légales & non-affiliation</h3><p>« La Team Basket » est un média indépendant d'actualité et d'information dédié au basket-ball. Ce site n'est ni affilié, ni associé, ni autorisé, ni approuvé par la National Basketball Association (NBA), ses franchises, ses joueurs ou toute autre entité officielle liée à la ligue.</p><p>Tous les noms d'équipes, noms de joueurs, marques commerciales, logos et éléments visuels mentionnés ou représentés sur ce site restent la propriété exclusive de la NBA Properties, Inc. et des franchises respectives. Leur mention sur ce site s'inscrit uniquement dans un cadre éditorial, informatif et journalistique.</p></div><div class="footer-bottom"><span>© <span id="year"></span> La Team Basket · Média indépendant</span><span>Fait pour les fans, avec passion 🏀</span></div></div></footer>
+
+  <dialog id="match-modal" class="match-modal"><div class="modal-head"><div><p class="eyebrow">FEUILLE DE MATCH</p><h2 id="modal-title">Boxscore</h2></div><button class="modal-close" id="modal-close" aria-label="Fermer">×</button></div><p class="modal-note">Statistiques fictives de démonstration — les données officielles seront chargées via l'API.</p><div class="table-wrap"><table><thead><tr><th>Joueur</th><th>MIN</th><th>PTS</th><th>REB</th><th>PD</th><th>INT</th><th>CTR</th></tr></thead><tbody id="boxscore-body"></tbody></table></div></dialog>
+  <script src="app.js"></script>
+</body>
+</html>

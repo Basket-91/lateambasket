@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 320" width="400" height="320" role="img" aria-labelledby="title desc">
+  <title id="title">La Team Basket</title>
+  <desc id="desc">Logo La Team Basket avec ballon orange et nom du média</desc>
+  <g fill="#F26513">
+    <path d="M182 192 A84 84 0 1 1 218 192 A78 78 0 1 0 182 192Z"/>
+    <path d="M200 30 Q204 112 200 196 Q196 112 200 30Z"/>
+    <path d="M118 118 Q200 76 282 118 Q200 88 118 118Z"/>
+    <path d="M150 48 C185 84 185 118 128 156 C174 116 174 84 150 48Z"/>
+    <path d="M250 48 C215 84 215 118 272 156 C226 116 226 84 250 48Z"/>
+  </g>
+  <text x="200" y="245" font-family="Montserrat, Arial Black, sans-serif" font-weight="900" font-size="38" fill="#F26513" text-anchor="middle" letter-spacing="2">LA TEAM</text>
+  <text x="200" y="288" font-family="Montserrat, Arial Black, sans-serif" font-weight="900" font-size="38" fill="#3B4854" text-anchor="middle" letter-spacing="2">BASKET</text>
+</svg>
