@@ -39,7 +39,7 @@ function addBox(st, raw, m) {
   return played > 0;
 }
 
-export async function onRequestGet({ env }) {
+export async function onRequestGet({ env, waitUntil }) {
   const kv = env.STATS;
   if (!kv) return j({ error: "kv_missing" }, 501);
   const season = hlSeason(), key = "season:" + season;
@@ -47,53 +47,7 @@ export async function onRequestGet({ env }) {
   const today = new Date().toISOString().slice(0, 10);
   if (st.budget.day !== today) st.budget = { day: today, used: 0 };
 
-  const needsWork = env.HIGHLIGHTLY_KEY && st.budget.used < DAILY_BUDGET && (Date.now() - st.listedAt > LIST_EVERY || st.pending.length > 0);
-  let changed = false, status = "ok";
-  if (needsWork && !(await kv.get("lock:" + season))) {
-    await kv.put("lock:" + season, "1", { expirationTtl: 60 });
-    try {
-      // 1. liste des matchs terminés de la saison
-      if (Date.now() - st.listedAt > LIST_EVERY) {
-        const seen = new Set(st.pending.map(x => x[0]));
-        let off = 0, finished = 0;
-        for (let page = 0; page < 6 && st.budget.used < DAILY_BUDGET; page++) {
-          const r = await hl(env, "matches", { league: "NBA", season, limit: 100, offset: off });
-          st.budget.used++;
-          const list = r.data || [];
-          for (const m of list) {
-            if (m.state && m.state.description === "Finished") {
-              finished++;
-              if (!st.done[m.id] && !seen.has(m.id)) { st.pending.push([m.id, String(m.date).slice(0, 10), m.homeTeam.id, m.homeTeam.displayName, m.awayTeam.id, m.awayTeam.displayName, 0]); seen.add(m.id); }
-            }
-          }
-          if (list.length < 100) break;
-          off += 100;
-        }
-        st.total = finished; st.listedAt = Date.now(); changed = true;
-      }
-      // 2. feuilles de match à comptabiliser (les plus anciennes d'abord)
-      st.pending.sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
-      const batch = st.pending.slice(0, Math.max(0, Math.min(BATCH, DAILY_BUDGET - st.budget.used)));
-      const doneNow = new Set();
-      let stop = false;
-      for (let i = 0; i < batch.length && !stop; i += 5) {
-        const chunk = batch.slice(i, i + 5);
-        const res = await Promise.allSettled(chunk.map(m => hl(env, "box-score/" + m[0])));
-        st.budget.used += chunk.length;
-        res.forEach((r, idx) => {
-          const m = chunk[idx];
-          if (r.status === "fulfilled" && addBox(st, r.value, m)) { st.done[m[0]] = 1; doneNow.add(m[0]); return; }
-          if (r.status === "rejected" && [401, 403, 429].includes(r.reason && r.reason.status)) { stop = true; status = "api_" + r.reason.status; return; }
-          m[6] = (m[6] || 0) + 1;
-          if (m[6] >= 3) { st.done[m[0]] = 1; doneNow.add(m[0]); } // feuille toujours vide : on l'abandonne
-        });
-      }
-      if (batch.length) { st.pending = st.pending.filter(m => !doneNow.has(m[0])); changed = true; }
-      if (changed) await kv.put(key, JSON.stringify(st));
-    } catch (e) { status = "error"; if (changed) await kv.put(key, JSON.stringify(st)); }
-    finally { await kv.delete("lock:" + season); }
-  }
-
+  // 1. Réponse immédiate à partir de ce qui est déjà stocké (lecture KV uniquement : rapide pour tous les visiteurs)
   const ps = Object.values(st.players);
   const maxG = ps.reduce((a, p) => Math.max(a, p.g), 0);
   const minG = Math.max(1, Math.floor(maxG * MIN_RATIO));
@@ -101,5 +55,61 @@ export async function onRequestGet({ env }) {
   for (const k of ["pts", "ast", "reb", "blk", "stl"]) {
     leaders[k] = ps.filter(p => p.g >= minG).map(p => ({ name: p.n, team: p.t, g: p.g, v: Math.round(p[k] / p.g * 10) / 10 })).sort((a, b) => b.v - a.v).slice(0, 5);
   }
-  return j({ season, status, gamesCounted: Object.keys(st.done).length, gamesTotal: st.total, minGames: minG, leaders }, 200, "public, max-age=300");
+  const res = j({ season, status: "ok", gamesCounted: Object.keys(st.done).length, gamesTotal: st.total, minGames: minG, budgetUsed: st.budget.used, budgetMax: DAILY_BUDGET, leaders }, 200, "public, max-age=60");
+
+  // 2. Mise à jour en arrière-plan (le visiteur n'attend jamais les appels à Highlightly)
+  const listStale = Date.now() - st.listedAt > (st.pending.length ? 12 * 36e5 : LIST_EVERY);
+  const needsWork = env.HIGHLIGHTLY_KEY && st.budget.used < DAILY_BUDGET && (listStale || st.pending.length > 0);
+  if (needsWork && !(await kv.get("lock:" + season))) {
+    await kv.put("lock:" + season, "1", { expirationTtl: 60 });
+    waitUntil(update(env, kv, key, season, st, listStale));
+  }
+  return res;
+}
+
+async function update(env, kv, key, season, st, listStale) {
+  let changed = false;
+  try {
+    // liste des matchs terminés de la saison
+    if (listStale) {
+      const seen = new Set(st.pending.map(x => x[0]));
+      let off = 0, finished = 0;
+      for (let page = 0; page < 6 && st.budget.used < DAILY_BUDGET; page++) {
+        const r = await hl(env, "matches", { league: "NBA", season, limit: 100, offset: off });
+        st.budget.used++;
+        const list = r.data || [];
+        for (const m of list) {
+          if (m.state && m.state.description === "Finished") {
+            finished++;
+            if (!st.done[m.id] && !seen.has(m.id)) { st.pending.push([m.id, String(m.date).slice(0, 10), m.homeTeam.id, m.homeTeam.displayName, m.awayTeam.id, m.awayTeam.displayName, 0]); seen.add(m.id); }
+          }
+        }
+        if (list.length < 100) break;
+        off += 100;
+      }
+      st.total = finished; st.listedAt = Date.now(); changed = true;
+    }
+    // feuilles de match à comptabiliser (les plus anciennes d'abord)
+    st.pending.sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
+    const batch = st.pending.slice(0, Math.max(0, Math.min(BATCH, DAILY_BUDGET - st.budget.used)));
+    const doneNow = new Set();
+    let stop = false;
+    for (let i = 0; i < batch.length && !stop; i += 5) {
+      const chunk = batch.slice(i, i + 5);
+      const res = await Promise.allSettled(chunk.map(m => hl(env, "box-score/" + m[0])));
+      st.budget.used += chunk.length;
+      res.forEach((r, idx) => {
+        const m = chunk[idx];
+        if (r.status === "fulfilled" && addBox(st, r.value, m)) { st.done[m[0]] = 1; doneNow.add(m[0]); return; }
+        if (r.status === "rejected" && [401, 403, 429].includes(r.reason && r.reason.status)) { stop = true; return; }
+        m[6] = (m[6] || 0) + 1;
+        if (m[6] >= 3) { st.done[m[0]] = 1; doneNow.add(m[0]); } // feuille toujours vide : on l'abandonne
+      });
+    }
+    if (batch.length) { st.pending = st.pending.filter(m => !doneNow.has(m[0])); changed = true; }
+  } catch (e) { /* on enregistre ce qui a été fait */ }
+  finally {
+    if (changed) await kv.put(key, JSON.stringify(st));
+    await kv.delete("lock:" + season);
+  }
 }
