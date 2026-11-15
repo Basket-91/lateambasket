@@ -383,8 +383,42 @@ function showLeaders() {
   el.innerHTML = cats.map(([name, abbr, k]) => `<article class="leader-card"><h2>${name} <span class="muted">(${abbr})</span></h2>${[...rows].sort((a, b) => b[k] - a[k]).slice(0, 5).map((r, i) => `<div class="leader-row"><span class="muted">${i + 1}</span><span>${esc(fullName(r.player))} <span class="muted">${esc(r.team.abbreviation)}</span></span><b>${r[k]}</b></div>`).join("")}</article>`).join("");
 }
 
-/* ---------- Classement ---------- */
+/* ---------- Classement (Highlightly, avec repli sur le calcul BallDontLie) ---------- */
+const stv = (row, name) => { const s = (row.statistics || []).find(x => x.displayName === name); return s ? s.value : undefined; };
+const streakFr = v => { const m = /^([WL])(\d+)$/i.exec(String(v || "")); return m ? m[2] + (m[1].toUpperCase() === "W" ? "V" : "D") : "—"; };
+let hlStandCache = null;
+async function hlStandings() {
+  if (hlStandCache && Date.now() - hlStandCache.t < 10 * 60 * 1000) return hlStandCache.d;
+  const r = await hl("standings", { leagueType: "NBA", year: currentSeason() + 1, limit: 20 });
+  const out = {};
+  for (const [conf, abbr] of [["East", "EAST"], ["West", "WEST"]]) {
+    const cands = (r.data || []).filter(x => String(x.abbreviation).toUpperCase() === abbr);
+    const item = cands.find(x => /regular/i.test(x.seasonType || "")) || cands[0];
+    if (!item || !(item.data || []).length) return null;
+    out[conf] = item.data.map(row => {
+      const l = Number(stv(row, "Losses")) || 0, pct = parseFloat(stv(row, "Win Percentage")) || 0;
+      let w = stv(row, "Wins");
+      w = w !== undefined ? Number(w) : (pct > 0 && pct < 1 ? Math.round(pct * l / (1 - pct)) : 0);
+      return { t: row.team, w, l, pct, pos: Number(stv(row, "Position")) || 99, streak: streakFr(stv(row, "Streak")) };
+    }).sort((a, b) => a.pos - b.pos || b.pct - a.pct);
+  }
+  hlStandCache = { t: Date.now(), d: out };
+  return out;
+}
 async function showStandings() {
+  const loading = '<tr><td colspan="6" class="loading">Chargement du classement…</td></tr>';
+  if (!hlStandCache && !state.season) { $("#east-body").innerHTML = loading; $("#west-body").innerHTML = loading; }
+  let hs = null;
+  try { hs = await hlStandings(); } catch (e) { hs = null; }
+  if (!hs) return showStandingsBDL();
+  try { await loadTeams(); } catch (e) {}
+  const abbrOf = t => { const b = state.teams && state.teams.find(x => norm(x.full_name) === norm(t.displayName || "")); return b ? b.abbreviation : t.abbreviation; };
+  for (const [conf, id] of [["East", "#east-body"], ["West", "#west-body"]]) {
+    $(id).innerHTML = hs[conf].map((r, i) => `<tr><td>${i + 1}</td><td class="team-pair">${esc(abbrOf(r.t))} <span class="muted">${esc(r.t.name)}</span></td><td>${r.w}</td><td>${r.l}</td><td>${(r.pct * 100).toFixed(1)}%</td><td class="${/V$/.test(r.streak) ? "streak-win" : /D$/.test(r.streak) ? "streak-loss" : ""}">${r.streak}</td></tr>`).join("");
+  }
+}
+/* Classement de secours : calculé depuis les résultats BallDontLie */
+async function showStandingsBDL() {
   const loading = '<tr><td colspan="6" class="loading">Calcul du classement…<span class="season-progress"></span></td></tr>';
   if (!state.season) { $("#east-body").innerHTML = loading; $("#west-body").innerHTML = loading; }
   try { await ensureSeason(); } catch (e) { const m = '<tr><td colspan="6" class="empty-state">Classement indisponible pour le moment.</td></tr>'; $("#east-body").innerHTML = m; $("#west-body").innerHTML = m; return; }
