@@ -10,7 +10,7 @@ const FRENCH = ["Victor Wembanyama", "Zaccharie Risacher", "Alex Sarr", "Rudy Go
 const CONF = { East: "Est", West: "Ouest" };
 const news = [["ANALYSE", "Les nouvelles tendances tactiques à suivre cette saison", "Décryptage des ajustements qui changent le visage du jeu."], ["FOCUS JOUEUR", "Les jeunes talents qui prennent une nouvelle dimension", "Tour d'horizon des progressions à surveiller."], ["DANS LA LIGUE", "La course aux premières places est lancée", "Les premières tendances de la saison se dessinent."]];
 
-const state = { tickerMode: "results", countdown: 300, windowGames: [], teams: null, season: null, noStats: false, nightStats: null, calLimit: 60, activeTeam: null, playoffToken: 0 };
+const state = { tickerMode: "results", countdown: 300, windowGames: [], teams: null, season: null, noStats: false, nightStats: null, boxCache: new Map(), hlDays: new Map(), modalToken: 0, calLimit: 60, activeTeam: null, playoffToken: 0 };
 
 /* ---------- Styles additionnels (états de chargement, lignes cliquables, détails de séries) ---------- */
 document.head.insertAdjacentHTML("beforeend", `<style>
@@ -21,6 +21,13 @@ document.head.insertAdjacentHTML("beforeend", `<style>
 .series-card ul{margin:8px 0 0;padding:0;list-style:none;font-size:9px;color:var(--muted)}
 .series-card li{padding:5px 0;border-top:1px solid var(--line)}
 .series-card summary{cursor:pointer;color:var(--orange);font-size:10px;font-weight:800;margin-top:9px}
+.match-modal{width:min(1080px,calc(100% - 24px));max-height:92vh}
+.box-team{font:800 13px Montserrat,sans-serif;margin:18px 0 8px}
+table.box{margin-bottom:6px}table.box td,table.box th{text-align:center}table.box td:first-child,table.box th:first-child{text-align:left}
+table.box tbody tr:nth-child(even){background:var(--card2)}
+table.box tr.starter-last td{border-bottom:2px solid var(--muted)}
+table.box tfoot td,table.box tr.box-total td{font-weight:800;border-top:2px solid var(--line);background:transparent}
+td.col-pts{font-weight:900;color:var(--orange)}
 </style>`);
 
 /* ---------- Couche API ---------- */
@@ -95,12 +102,90 @@ async function loadWindow() {
   const d = await nba("games", { start_date: ymd(addDays(-3)), end_date: ymd(addDays(4)), per_page: 100 });
   state.windowGames = (d.data || []).map(normGame).sort((a, b) => a.ts - b.ts);
 }
+/* ---------- Couche Highlightly (feuilles de match, via /api/hl) ---------- */
+const OLD_MS = 4 * 36e5; // au-delà de 4 h après le coup d'envoi, un match est considéré comme définitivement terminé
+async function hl(p, params = {}, final = false) {
+  const qs = new URLSearchParams({ p });
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) qs.append(k, v);
+  if (final) qs.set("final", "1");
+  const key = "hl:" + qs.toString();
+  const hit = memCache.get(key);
+  if (hit && Date.now() - hit.t < 5 * 60 * 1000) return hit.d;
+  const r = await fetch("/api/hl?" + qs.toString());
+  if (!r.ok) throw new ApiError(r.status);
+  const d = await r.json();
+  memCache.set(key, { t: Date.now(), d });
+  return d;
+}
+const sameTeam = (h, b) => norm(h.displayName || "") === norm(b.full_name || "") || (!!h.abbreviation && h.abbreviation === b.abbreviation);
+async function hlMatches(d) {
+  const c = state.hlDays.get(d);
+  if (c && Date.now() - c.t < 10 * 60 * 1000) return c.list;
+  const r = await hl("matches", { league: "NBA", date: d, timezone: TZ, limit: 100 });
+  const list = r.data || [];
+  state.hlDays.set(d, { t: Date.now(), list });
+  return list;
+}
+async function hlMatch(g) {
+  for (const d of [...new Set([ymd(g.when), ymd(new Date(g.ts + 864e5))])]) {
+    const m = (await hlMatches(d)).find(x => sameTeam(x.homeTeam, g.raw.home_team) && sameTeam(x.awayTeam, g.raw.visitor_team));
+    if (m) return m;
+  }
+  return null;
+}
+const STAT = { min: "Total Minutes Played", pts: "Total Points Scored", fgm: "Successful Field Goals", fga: "Total Field Goals", tpm: "Successful 3PT Field Goals", tpa: "Total 3PT Field Goals", ftm: "Successful Free Throws", fta: "Total Free Throws", reb: "Total Rebounds", ast: "Total Assists", tov: "Total Turnovers", stl: "Total Steals", blk: "Total Blocks", oreb: "Total Offensive Rebounds", dreb: "Total Defensive Rebounds", pf: "Total Fouls", pm: "Plus Minus" };
+function parsePlayer(p) {
+  const o = { id: p.player && p.player.id, name: (p.player && p.player.name) || "", jersey: p.player && p.player.jersey };
+  const list = p.statistics || [];
+  for (const [k, n] of Object.entries(STAT)) { const s = list.find(x => x.name === n); o[k] = s ? Number(s.value) || 0 : 0; }
+  return o;
+}
+function parseBox(raw, m) {
+  const teams = (Array.isArray(raw) ? raw : []).map(t => ({ id: t.team && t.team.id, players: (t.boxScores || []).map(parsePlayer) }));
+  const home = teams.find(t => t.id === m.homeTeam.id) || teams[0];
+  const away = teams.find(t => t.id === m.awayTeam.id) || teams[1];
+  return { home: home || { players: [] }, away: away || { players: [] } };
+}
+async function getBox(g) {
+  if (!g.final && !g.live) return null;
+  const old = Date.now() - g.ts > OLD_MS, c = state.boxCache.get(g.id);
+  if (c && ((old && c.ready) || Date.now() - c.t < 120000)) return c;
+  const m = await hlMatch(g);
+  if (!m) return null;
+  const box = parseBox(await hl("box-score/" + m.id, {}, old), m);
+  const ready = box.home.players.some(p => p.min > 0) && box.away.players.some(p => p.min > 0);
+  const out = { t: Date.now(), match: m, box, ready, starters: c ? c.starters : null };
+  state.boxCache.set(g.id, out);
+  return out;
+}
+async function getStarters(g, c) {
+  if (c.starters) return c.starters;
+  const s = new Set();
+  try {
+    const l = await hl("lineups/" + c.match.id, {}, Date.now() - g.ts > OLD_MS);
+    for (const side of [l.home, l.away]) for (const p of (side && side.lineup) || []) if (p.isStarter) { s.add(p.id); s.add(norm(p.player || "")); }
+    c.starters = s;
+  } catch (e) { /* titulaires indisponibles : on affiche sans séparation */ }
+  return s;
+}
+function boxRows(g, c) {
+  const rows = [];
+  [[c.box.home, g.homeId, g.home], [c.box.away, g.awayId, g.away]].forEach(([side, id, ab]) => side.players.filter(p => p.min > 0).forEach(p => {
+    const parts = p.name.trim().split(/\s+/);
+    rows.push({ player: { first_name: parts[0] || "?", last_name: parts.slice(1).join(" ") || parts[0] || "?" }, team: { id, abbreviation: ab }, game: { id: g.id }, min: p.min, pts: p.pts, reb: p.reb, ast: p.ast, stl: p.stl, blk: p.blk });
+  }));
+  return rows;
+}
 async function loadNightStats() {
   if (state.noStats) return;
-  const dates = [...new Set(lastNight().map(g => g.date))];
-  if (!dates.length) { state.nightStats = []; return; }
-  try { state.nightStats = await fetchAll("stats", { "dates[]": dates }, 4); }
-  catch (e) { if (e.status === 401 || e.status === 403) state.noStats = true; else state.nightStats = state.nightStats || []; }
+  const games = lastNight();
+  if (!games.length) { state.nightStats = []; return; }
+  const rows = [];
+  for (const g of games) {
+    try { const c = await getBox(g); if (c) rows.push(...boxRows(g, c)); }
+    catch (e) { if (e.status === 401 || e.status === 403) { state.noStats = true; return; } if (e.status === 429) break; }
+  }
+  state.nightStats = rows;
 }
 async function loadTeams() {
   if (state.teams) return state.teams;
@@ -162,7 +247,7 @@ function showScores() {
   const g = lastNight();
   $("#home-scores").innerHTML = g.map(x => `<div class="score-row" data-game="${x.id}"><span class="score-team">${esc(x.away)}</span><span class="score-center">${x.a} – ${x.h}<small>TERMINÉ</small></span><span class="score-team">${esc(x.home)}</span></div>`).join("") || '<div class="empty-state">Aucun résultat récent.</div>';
 }
-const PAY = "Statistiques individuelles : disponibles avec l'offre payante de BallDontLie.";
+const PAY = "Statistiques individuelles momentanément indisponibles (clé Highlightly absente, refusée ou quota du jour atteint).";
 const playedMin = r => r.min && r.min !== "00" && r.min !== "0" && r.min !== "00:00";
 const fullName = p => `${p.first_name} ${p.last_name}`;
 
@@ -187,20 +272,46 @@ function showTop() {
 function showNews() { $("#news-grid").innerHTML = news.map((n, i) => `<article class="news-card" tabindex="0" data-news="${i}"><div class="news-art">${["NBA", "FOCUS", "24/7"][i]}</div><div class="news-copy"><small>${n[0]}</small><h3>${n[1]}</h3><p>${n[2]}</p></div></article>`).join(""); }
 
 /* ---------- Feuille de match ---------- */
+function sortRows(players, starters) {
+  const st = p => starters.has(p.id) || starters.has(norm(p.name));
+  const played = players.filter(p => p.min > 0);
+  return [...played.filter(st), ...played.filter(p => !st(p)).sort((x, y) => y.min - x.min)].map(p => ({ ...p, starter: st(p) }));
+}
+const evalScore = p => (p.pts + p.reb + p.ast + p.stl + p.blk) - ((p.fga - p.fgm) + (p.fta - p.ftm) + p.tov);
+function teamTable(title, score, players, starters) {
+  const rows = sortRows(players, starters);
+  const sum = k => rows.reduce((a, p) => a + p[k], 0);
+  const lastStarter = rows.reduce((a, p, i) => p.starter ? i : a, -1);
+  const body = rows.map((p, i) => `<tr class="${i === lastStarter && lastStarter < rows.length - 1 ? "starter-last" : ""}"><td>${esc(p.name)}</td><td>${Math.round(p.min)}</td><td>${p.fgm}/${p.fga}</td><td>${p.tpm}/${p.tpa}</td><td>${p.ftm}/${p.fta}</td><td>${p.oreb}</td><td>${p.dreb}</td><td>${p.reb}</td><td>${p.ast}</td><td>${p.pf}</td><td>${p.stl}</td><td>${p.tov}</td><td>${p.blk}</td><td>${p.pm > 0 ? "+" : ""}${p.pm}</td><td class="col-pts">${p.pts}</td><td>${evalScore(p)}</td></tr>`).join("");
+  const foot = `<tr class="box-total"><td>Total</td><td></td><td>${sum("fgm")}/${sum("fga")}</td><td>${sum("tpm")}/${sum("tpa")}</td><td>${sum("ftm")}/${sum("fta")}</td><td>${sum("oreb")}</td><td>${sum("dreb")}</td><td>${sum("reb")}</td><td>${sum("ast")}</td><td>${sum("pf")}</td><td>${sum("stl")}</td><td>${sum("tov")}</td><td>${sum("blk")}</td><td></td><td class="col-pts">${sum("pts")}</td><td></td></tr>`;
+  return `<h3 class="box-team">${esc(title)} · ${score ?? "—"}</h3><div class="table-wrap"><table class="box"><thead><tr><th>Joueurs</th><th>Min</th><th>Tirs</th><th>3pts</th><th>LF</th><th>O</th><th>D</th><th>T</th><th>Pd</th><th>Fte</th><th>Int</th><th>Bp</th><th>Ct</th><th>+/-</th><th>Pts</th><th>Éval</th></tr></thead><tbody>${body}${foot}</tbody></table></div>`;
+}
+function quarterTable(g, m) {
+  const sc = (m.state && m.state.score) || {}, a = sc.awayTeam || [], h = sc.homeTeam || [];
+  if (!a.length) return "";
+  const head = a.map((_, i) => `<th>${i < 4 ? "Q" + (i + 1) : "PR" + (i > 4 ? i - 3 : "")}</th>`).join("");
+  const row = (n, arr) => `<tr><td class="team-pair">${esc(n)}</td>${arr.map(v => `<td>${v}</td>`).join("")}<td class="col-pts">${arr.reduce((x, y) => x + (+y || 0), 0)}</td></tr>`;
+  return `<div class="table-wrap"><table class="box"><thead><tr><th>Score</th>${head}<th>Total</th></tr></thead><tbody>${row(g.away, a)}${row(g.home, h)}</tbody></table></div>`;
+}
 async function openGame(id) {
   const g = findGame(id); if (!g) return;
-  const note = $(".modal-note"), body = $("#boxscore-body");
+  const note = $(".modal-note"), wrap = $("#match-modal .table-wrap"), token = ++state.modalToken;
   $("#modal-title").textContent = `${g.away} ${g.a ?? "—"} – ${g.h ?? "—"} ${g.home}`;
-  body.innerHTML = ""; note.textContent = "Chargement de la feuille de match…";
+  wrap.innerHTML = ""; note.textContent = "Chargement de la feuille de match…";
   $("#match-modal").showModal();
   if (!g.final && !g.live) { note.textContent = "Match à venir : la feuille de match sera disponible après la rencontre."; return; }
   try {
-    const rows = (await fetchAll("stats", { "game_ids[]": id }, 3)).filter(playedMin);
-    rows.sort((a, b) => (a.team.id === b.team.id ? b.pts - a.pts : a.team.id - b.team.id));
-    body.innerHTML = rows.map(r => `<tr><td>${esc(r.player.first_name[0])}. ${esc(r.player.last_name)} <span class="muted">${esc(r.team.abbreviation)}</span></td><td>${esc(r.min)}</td><td>${r.pts}</td><td>${r.reb}</td><td>${r.ast}</td><td>${r.stl}</td><td>${r.blk}</td></tr>`).join("");
-    note.textContent = rows.length ? "Statistiques officielles via BallDontLie." : "Feuille de match pas encore disponible.";
+    const c = await getBox(g);
+    if (token !== state.modalToken) return;
+    if (!c) { note.textContent = "Feuille de match introuvable pour cette rencontre."; return; }
+    const starters = await getStarters(g, c);
+    if (token !== state.modalToken) return;
+    const m = c.match;
+    wrap.innerHTML = quarterTable(g, m) + teamTable(m.awayTeam.displayName || g.away, g.a, c.box.away.players, starters) + teamTable(m.homeTeam.displayName || g.home, g.h, c.box.home.players, starters);
+    note.textContent = c.ready ? "Statistiques officielles via Highlightly." : "Feuille de match pas encore complète : les chiffres peuvent évoluer.";
   } catch (e) {
-    note.textContent = (e.status === 401 || e.status === 403) ? "Les feuilles de match détaillées nécessitent l'offre payante de BallDontLie." : "Impossible de charger la feuille de match pour le moment.";
+    if (token !== state.modalToken) return;
+    note.textContent = e.status === 429 ? "Quota quotidien de l'API atteint, réessaie plus tard." : (e.status === 401 || e.status === 403) ? "Accès à l'API refusé : vérifie la clé HIGHLIGHTLY_KEY dans Cloudflare." : "Impossible de charger la feuille de match pour le moment.";
   }
 }
 
@@ -264,7 +375,7 @@ async function openTeam(id) {
 /* ---------- Statistiques ---------- */
 function showLeaders() {
   const el = $("#leaders-grid"), sub = $("#page-stats .section-subtitle");
-  if (state.noStats) { el.innerHTML = `<div class="paywall">Les leaders de la saison nécessitent l'offre payante de BallDontLie (statistiques). Ils s'afficheront automatiquement dès que ta clé y aura accès.</div>`; return; }
+  if (state.noStats) { el.innerHTML = `<div class="paywall">Statistiques momentanément indisponibles (clé Highlightly absente, refusée ou quota du jour atteint).</div>`; return; }
   if (!state.nightStats) { el.innerHTML = '<div class="loading">Chargement…</div>'; return; }
   if (sub) sub.textContent = "Les cinq meilleurs de la dernière nuit dans chaque catégorie.";
   const cats = [["Scoreurs", "PTS", "pts"], ["Passeurs", "PDS", "ast"], ["Rebondeurs", "REB", "reb"], ["Contreurs", "CTR", "blk"], ["Interceptions", "INT", "stl"]];
@@ -340,7 +451,7 @@ function initTheme() { const saved = localStorage.getItem("ltb-theme"); if (save
 function updateThemeButton() { const light = document.body.dataset.theme === "light"; $(".theme-icon").textContent = light ? "☾" : "☼"; $(".theme-label").textContent = light ? "Mode sombre" : "Mode clair"; $("#theme-toggle").setAttribute("aria-label", light ? "Passer en mode sombre" : "Passer en mode clair"); }
 function setNotice(ok) {
   const n = $(".demo-notice"); if (!n) return;
-  n.innerHTML = ok ? `<span>BÊTA</span> Scores, calendrier et classement en direct via BallDontLie.${state.noStats ? " Statistiques individuelles : offre payante requise." : ""} Les articles de la rubrique actualités sont des exemples.` : "<span>HORS LIGNE</span> Les données NBA sont momentanément indisponibles. Réessaie dans quelques instants.";
+  n.innerHTML = ok ? `<span>BÊTA</span> Scores, calendrier et classement via BallDontLie, feuilles de match via Highlightly.${state.noStats ? " Statistiques individuelles momentanément indisponibles." : ""} Les articles de la rubrique actualités sont des exemples.` : "<span>HORS LIGNE</span> Les données NBA sont momentanément indisponibles. Réessaie dans quelques instants.";
 }
 function setHeadline() {
   const el = $("#page-home .section-heading .eyebrow");
