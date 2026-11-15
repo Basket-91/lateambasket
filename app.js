@@ -10,7 +10,7 @@ const FRENCH = ["Victor Wembanyama", "Zaccharie Risacher", "Alex Sarr", "Rudy Go
 const CONF = { East: "Est", West: "Ouest" };
 const news = [["ANALYSE", "Les nouvelles tendances tactiques à suivre cette saison", "Décryptage des ajustements qui changent le visage du jeu."], ["FOCUS JOUEUR", "Les jeunes talents qui prennent une nouvelle dimension", "Tour d'horizon des progressions à surveiller."], ["DANS LA LIGUE", "La course aux premières places est lancée", "Les premières tendances de la saison se dessinent."]];
 
-const state = { tickerMode: "results", countdown: 300, windowGames: [], teams: null, season: null, noStats: false, nightStats: null, boxCache: new Map(), hlDays: new Map(), modalToken: 0, calLimit: 60, activeTeam: null, playoffToken: 0 };
+const state = { tickerMode: "results", countdown: 300, windowGames: [], teams: null, season: null, noStats: false, nightStats: null, boxCache: new Map(), hlDays: new Map(), modalToken: 0, calLimit: 60, activeTeam: null, playoffToken: 0, gameIndex: new Map(), calMonths: new Map(), calGames: null, calToken: 0, sl: null, statsMode: "night", statsModeSet: false };
 
 /* ---------- Styles additionnels (états de chargement, lignes cliquables, détails de séries) ---------- */
 document.head.insertAdjacentHTML("beforeend", `<style>
@@ -28,6 +28,9 @@ table.box tbody tr:nth-child(even){background:var(--card2)}
 table.box tr.starter-last td{border-bottom:2px solid var(--muted)}
 table.box tfoot td,table.box tr.box-total td{font-weight:800;border-top:2px solid var(--line);background:transparent}
 td.col-pts{font-weight:900;color:var(--orange)}
+.seg{display:flex;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:3px}
+.seg button{border:0;background:transparent;color:var(--muted);font-size:11px;font-weight:800;padding:7px 13px;border-radius:6px}
+.seg button.active{background:var(--orange);color:#fff}
 </style>`);
 
 /* ---------- Couche API ---------- */
@@ -89,7 +92,7 @@ function normGame(r) {
     liveLabel: live ? `${r.period ? r.period + "e QT" : "En cours"}${r.time ? " · " + r.time : ""}` : ""
   };
 }
-const findGame = id => state.windowGames.find(g => g.id === id) || (state.season && state.season.games.find(g => g.id === id));
+const findGame = id => state.windowGames.find(g => g.id === id) || state.gameIndex.get(id) || (state.season && state.season.games.find(g => g.id === id));
 function lastNight() {
   const f = state.windowGames.filter(g => g.final);
   if (!f.length) return [];
@@ -315,24 +318,46 @@ async function openGame(id) {
   }
 }
 
-/* ---------- Calendrier ---------- */
+/* ---------- Calendrier (par mois : charge uniquement le mois affiché) ---------- */
+function seasonMonths() {
+  const y = currentSeason(), out = [];
+  for (let i = 0; i < 9; i++) { const d = new Date(Date.UTC(y, 9 + i, 1)); out.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`); }
+  return out;
+}
+const monthLabel = m => { const t = new Intl.DateTimeFormat("fr-FR", { timeZone: "UTC", month: "long", year: "numeric" }).format(new Date(m + "-01T12:00:00Z")); return t.charAt(0).toUpperCase() + t.slice(1); };
+function ensureCalendarControls() {
+  if ($("#calendar-month")) return;
+  const f = $("#calendar-filter"); if (!f) return;
+  const months = seasonMonths(), now = ymd(new Date()).slice(0, 7), def = months.includes(now) ? now : months[0];
+  f.insertAdjacentHTML("beforebegin", `<select id="calendar-month" class="select-control" aria-label="Choisir le mois">${months.map(m => `<option value="${m}"${m === def ? " selected" : ""}>${monthLabel(m)}</option>`).join("")}</select>`);
+  $("#calendar-month").onchange = showCalendar;
+}
+async function monthGames(m) {
+  const c = state.calMonths.get(m), cur = m === ymd(new Date()).slice(0, 7);
+  if (c && Date.now() - c.t < (cur ? 5 : 60) * 60 * 1000) return c.games;
+  const [y, mo] = m.split("-").map(Number), last = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  const raw = await fetchAll("games", { start_date: `${m}-01`, end_date: `${m}-${String(last).padStart(2, "0")}` }, 6);
+  const games = raw.map(normGame).sort((a, b) => a.ts - b.ts);
+  games.forEach(g => state.gameIndex.set(g.id, g));
+  state.calMonths.set(m, { t: Date.now(), games });
+  return games;
+}
 async function showCalendar() {
-  const body = $("#calendar-body");
-  if (!state.season) {
-    body.innerHTML = '<tr><td colspan="5" class="loading">Chargement du calendrier…<span class="season-progress"></span></td></tr>';
-    try { await ensureSeason(); } catch (e) { body.innerHTML = '<tr><td colspan="5" class="empty-state">Calendrier indisponible pour le moment.</td></tr>'; return; }
-  }
-  renderCalendar();
+  ensureCalendarControls();
+  const body = $("#calendar-body"), token = ++state.calToken;
+  body.innerHTML = '<tr><td colspan="5" class="loading">Chargement du calendrier…</td></tr>';
+  try {
+    const games = await monthGames($("#calendar-month").value);
+    if (token !== state.calToken) return;
+    state.calGames = games; renderCalendar();
+  } catch (e) { if (token === state.calToken) body.innerHTML = '<tr><td colspan="5" class="empty-state">Calendrier indisponible pour le moment.</td></tr>'; }
 }
 function renderCalendar() {
-  const filter = $("#calendar-filter").value; let games = state.season.games;
-  if (filter === "played") games = games.filter(g => g.final).reverse();
+  const filter = $("#calendar-filter").value; let games = state.calGames || [];
+  if (filter === "played") games = games.filter(g => g.final);
   else if (filter === "upcoming") games = games.filter(g => !g.final);
-  else { const i = games.findIndex(g => g.ts >= Date.now() - 3 * 864e5); games = i < 0 ? games.slice(-60) : games.slice(i); }
-  const shown = games.slice(0, state.calLimit);
-  let rows = shown.map(g => `<tr><td>${whenFr(g)}</td><td class="team-pair">${esc(g.away)} <span class="muted">@</span> ${esc(g.home)}</td><td>${g.final ? `${g.a} – ${g.h}` : g.live ? `${g.a} – ${g.h} <span class="live-label">${esc(g.liveLabel)}</span>` : '<span class="muted">À venir</span>'}</td><td>—</td><td>${g.final ? `<button class="table-action" data-game="${g.id}">Feuille de match</button>` : "—"}</td></tr>`).join("");
-  if (games.length > shown.length) rows += `<tr><td colspan="5" style="text-align:center"><button class="table-action" data-more="1">Afficher plus de matchs (${games.length - shown.length} restants)</button></td></tr>`;
-  $("#calendar-body").innerHTML = rows || '<tr><td colspan="5" class="empty-state">Aucun match dans ce filtre.</td></tr>';
+  const rows = games.map(g => `<tr><td>${whenFr(g)}</td><td class="team-pair">${esc(g.away)} <span class="muted">@</span> ${esc(g.home)}</td><td>${g.final ? `${g.a} – ${g.h}` : g.live ? `${g.a} – ${g.h} <span class="live-label">${esc(g.liveLabel)}</span>` : '<span class="muted">À venir</span>'}</td><td>—</td><td>${g.final ? `<button class="table-action" data-game="${g.id}">Feuille de match</button>` : "—"}</td></tr>`).join("");
+  $("#calendar-body").innerHTML = rows || '<tr><td colspan="5" class="empty-state">Aucun match dans ce filtre pour ce mois.</td></tr>';
 }
 
 /* ---------- Équipes ---------- */
@@ -343,15 +368,18 @@ async function showTeams() {
     try { await loadTeams(); } catch (e) { grid.innerHTML = '<div class="empty-state">Équipes indisponibles pour le moment.</div>'; return; }
   }
   renderTeams();
-  ensureSeason().then(renderTeams).catch(() => {});
+  hlStandings().then(renderTeams).catch(() => {});
+}
+function hlRecords() {
+  const m = new Map();
+  if (hlStandCache) for (const conf of ["East", "West"]) (hlStandCache.d[conf] || []).forEach((r, i) => m.set(norm(r.t.displayName || ""), { w: r.w, l: r.l, streak: r.streak, rank: i + 1 }));
+  return m;
 }
 function renderTeams() {
   if (!state.teams) return;
-  const q = norm($("#team-search").value), s = state.season;
-  const ranks = new Map();
-  if (s) ["East", "West"].forEach(c => standingsFor(s.records, c).forEach((r, i) => ranks.set(r.t.id, i + 1)));
+  const q = norm($("#team-search").value), recs = hlRecords();
   $("#team-grid").innerHTML = state.teams.filter(t => norm([t.full_name, t.abbreviation, t.city, t.name, CONF[t.conference]].join(" ")).includes(q)).map(t => {
-    const r = s && s.records.get(t.id), k = ranks.get(t.id);
+    const r = recs.get(norm(t.full_name)), k = r && r.rank;
     return `<article class="team-card" data-team="${t.id}"><div class="team-monogram">${esc(t.abbreviation)}</div><h3>${esc(t.full_name)}</h3><p>Conférence ${CONF[t.conference] || ""}${k ? " · " + (k === 1 ? "1er" : k + "e") : ""}</p><div class="team-record"><span>${r ? `${r.w} V / ${r.l} D` : "— V / — D"}</span><span class="muted">Voir →</span></div></article>`;
   }).join("") || '<div class="empty-state">Aucune équipe trouvée.</div>';
 }
@@ -363,7 +391,7 @@ async function openTeam(id) {
   state.activeTeam = t.id;
   $("#team-grid").hidden = true;
   const det = $("#team-detail"); det.hidden = false;
-  const r = state.season && state.season.records.get(t.id);
+  const r = hlRecords().get(norm(t.full_name));
   det.innerHTML = `<div class="team-detail-head"><button class="back-button" id="team-back">← Toutes les équipes</button><div><p class="eyebrow">FRANCHISE NBA · ${(CONF[t.conference] || "").toUpperCase()}</p><h2>${esc(t.full_name)}</h2>${r ? `<p class="section-subtitle">Bilan : ${r.w} V – ${r.l} D · Série en cours : ${esc(r.streak)}</p>` : ""}</div></div><div id="roster" class="loading">Chargement de l'effectif…</div>`;
   try {
     const players = (await fetchAll("players", { "team_ids[]": t.id }, 3)).sort((a, b) => a.last_name.localeCompare(b.last_name));
@@ -373,14 +401,40 @@ async function openTeam(id) {
 }
 
 /* ---------- Statistiques ---------- */
-function showLeaders() {
+function ensureStatsToggle() {
+  if ($("#stats-toggle")) return;
+  const pill = $("#page-stats .edition-pill"); if (!pill) return;
+  pill.insertAdjacentHTML("afterend", '<div id="stats-toggle" class="seg"><button data-mode="season">Saison</button><button data-mode="night">La nuit</button></div>');
+  $("#stats-toggle").addEventListener("click", e => { const b = e.target.closest("button[data-mode]"); if (!b) return; state.statsMode = b.dataset.mode; state.statsModeSet = true; showLeaders(); });
+}
+async function loadSeasonLeaders() {
+  if (state.sl && Date.now() - state.sl.t < 5 * 60 * 1000) return state.sl.d;
+  let d = null;
+  try { const r = await fetch("/api/leaders"); if (r.ok) d = await r.json(); } catch (e) { d = null; }
+  state.sl = { t: Date.now(), d };
+  return d;
+}
+const LEAD_CATS = [["Scoreurs", "PTS", "pts"], ["Passeurs", "PDS", "ast"], ["Rebondeurs", "REB", "reb"], ["Contreurs", "CTR", "blk"], ["Interceptions", "INT", "stl"]];
+async function showLeaders() {
+  ensureStatsToggle();
   const el = $("#leaders-grid"), sub = $("#page-stats .section-subtitle");
+  if (!state.sl) el.innerHTML = '<div class="loading">Chargement…</div>';
+  const sl = await loadSeasonLeaders();
+  const seasonOk = !!(sl && sl.leaders && sl.gamesCounted > 0);
+  if (!seasonOk) state.statsMode = "night"; else if (!state.statsModeSet) state.statsMode = "season";
+  const tg = $("#stats-toggle");
+  if (tg) { $$("button", tg).forEach(b => b.classList.toggle("active", b.dataset.mode === state.statsMode)); tg.hidden = !seasonOk; }
+  if (state.statsMode === "season") {
+    const abbrOf = n => { const t = state.teams && state.teams.find(x => norm(x.full_name) === norm(n || "")); return t ? t.abbreviation : (n || ""); };
+    if (sub) sub.textContent = `Moyennes par match · saison ${sl.season - 1}-${String(sl.season).slice(2)} · minimum ${sl.minGames} matchs joués` + (sl.gamesCounted < sl.gamesTotal ? ` · calcul en cours (${sl.gamesCounted} matchs sur ${sl.gamesTotal})` : "");
+    el.innerHTML = LEAD_CATS.map(([name, abbr, k]) => `<article class="leader-card"><h2>${name} <span class="muted">(${abbr})</span></h2>${(sl.leaders[k] || []).map((r, i) => `<div class="leader-row"><span class="muted">${i + 1}</span><span>${esc(r.name)} <span class="muted">${esc(abbrOf(r.team))}</span></span><b>${r.v.toFixed(1)}</b></div>`).join("")}</article>`).join("");
+    return;
+  }
   if (state.noStats) { el.innerHTML = `<div class="paywall">Statistiques momentanément indisponibles (clé Highlightly absente, refusée ou quota du jour atteint).</div>`; return; }
   if (!state.nightStats) { el.innerHTML = '<div class="loading">Chargement…</div>'; return; }
   if (sub) sub.textContent = "Les cinq meilleurs de la dernière nuit dans chaque catégorie.";
-  const cats = [["Scoreurs", "PTS", "pts"], ["Passeurs", "PDS", "ast"], ["Rebondeurs", "REB", "reb"], ["Contreurs", "CTR", "blk"], ["Interceptions", "INT", "stl"]];
   const rows = state.nightStats.filter(playedMin);
-  el.innerHTML = cats.map(([name, abbr, k]) => `<article class="leader-card"><h2>${name} <span class="muted">(${abbr})</span></h2>${[...rows].sort((a, b) => b[k] - a[k]).slice(0, 5).map((r, i) => `<div class="leader-row"><span class="muted">${i + 1}</span><span>${esc(fullName(r.player))} <span class="muted">${esc(r.team.abbreviation)}</span></span><b>${r[k]}</b></div>`).join("")}</article>`).join("");
+  el.innerHTML = LEAD_CATS.map(([name, abbr, k]) => `<article class="leader-card"><h2>${name} <span class="muted">(${abbr})</span></h2>${[...rows].sort((a, b) => b[k] - a[k]).slice(0, 5).map((r, i) => `<div class="leader-row"><span class="muted">${i + 1}</span><span>${esc(fullName(r.player))} <span class="muted">${esc(r.team.abbreviation)}</span></span><b>${r[k]}</b></div>`).join("")}</article>`).join("");
 }
 
 /* ---------- Classement (Highlightly, avec repli sur le calcul BallDontLie) ---------- */
@@ -528,7 +582,7 @@ function init() {
   $("#ticker-prev").onclick = () => $("#ticker-track").scrollBy({ left: -250, behavior: "smooth" });
   $("#ticker-next").onclick = () => $("#ticker-track").scrollBy({ left: 250, behavior: "smooth" });
   $("#refresh-btn").onclick = () => { $("#refresh-label").textContent = "Actualisation…"; refreshData(); };
-  $("#calendar-filter").onchange = () => { state.calLimit = 60; if (state.season) renderCalendar(); };
+  $("#calendar-filter").onchange = () => { if (state.calGames) renderCalendar(); };
   $("#calendar-body").addEventListener("click", e => { if (e.target.closest("[data-more]")) { state.calLimit += 60; renderCalendar(); return; } openFrom(e); });
   $("#team-search").oninput = () => { if (state.teams) renderTeams(); };
   $("#team-grid").addEventListener("click", e => { const c = e.target.closest("[data-team]"); if (c) openTeam(c.dataset.team); });
