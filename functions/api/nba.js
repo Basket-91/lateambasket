@@ -5,6 +5,8 @@ const BASE = "https://api.balldontlie.io/v1/";
 function ttlFor(path, params) {
   if (path === "teams" || path === "players") return 86400;      // change rarement
   if (params.get("postseason") === "true") return 3600;           // playoffs
+  const end = params.get("end_date");                              // mois entièrement passé : ne change plus
+  if (path === "games" && end && end < new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10)) return 604800;
   if (path === "games" && params.has("seasons[]")) return 900;    // saison complète
   return 300;                                                     // scores du jour : 5 minutes
 }
