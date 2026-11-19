@@ -10,7 +10,7 @@ const FRENCH = ["Victor Wembanyama", "Zaccharie Risacher", "Alex Sarr", "Rudy Go
 const CONF = { East: "Est", West: "Ouest" };
 const news = [["ANALYSE", "Les nouvelles tendances tactiques à suivre cette saison", "Décryptage des ajustements qui changent le visage du jeu."], ["FOCUS JOUEUR", "Les jeunes talents qui prennent une nouvelle dimension", "Tour d'horizon des progressions à surveiller."], ["DANS LA LIGUE", "La course aux premières places est lancée", "Les premières tendances de la saison se dessinent."]];
 
-const state = { tickerMode: "results", countdown: 300, windowGames: [], teams: null, season: null, noStats: false, nightStats: null, boxCache: new Map(), hlDays: new Map(), modalToken: 0, calLimit: 60, activeTeam: null, playoffToken: 0, gameIndex: new Map(), calMonths: new Map(), calGames: null, calToken: 0, sl: null, statsMode: "night", statsModeSet: false };
+const state = { tickerMode: "results", countdown: 300, windowGames: [], teams: null, season: null, noStats: false, nightStats: null, boxCache: new Map(), hlDays: new Map(), modalToken: 0, calLimit: 60, activeTeam: null, playoffToken: 0, gameIndex: new Map(), calMonths: new Map(), calGames: null, calToken: 0, sl: null, statsMode: "night", statsModeSet: false, tops: new Map(), topsLoaded: new Map() };
 
 /* ---------- Styles additionnels (états de chargement, lignes cliquables, détails de séries) ---------- */
 document.head.insertAdjacentHTML("beforeend", `<style>
@@ -28,6 +28,12 @@ table.box tbody tr:nth-child(even){background:var(--card2)}
 table.box tr.starter-last td{border-bottom:2px solid var(--muted)}
 table.box tfoot td,table.box tr.box-total td{font-weight:800;border-top:2px solid var(--line);background:transparent}
 td.col-pts{font-weight:900;color:var(--orange)}
+/* bandeau : défilement possible jusqu'aux deux extrémités (centré seulement quand tout tient) */
+.ticker-track{min-width:0;justify-content:flex-start!important}
+.ticker-track>:first-child{margin-left:auto}.ticker-track>:last-child{margin-right:auto}
+.ticker-game{flex:0 0 160px}
+tr.starter td:first-child{font-weight:800}
+.table-panel tr.starter-last td{border-bottom:2px solid var(--muted)}
 .seg{display:flex;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:3px}
 .seg button{border:0;background:transparent;color:var(--muted);font-size:11px;font-weight:800;padding:7px 13px;border-radius:6px}
 .seg button.active{background:var(--orange);color:#fff}
@@ -349,14 +355,33 @@ async function showCalendar() {
   try {
     const games = await monthGames($("#calendar-month").value);
     if (token !== state.calToken) return;
-    state.calGames = games; renderCalendar();
+    state.calGames = games; renderCalendar(); loadTops($("#calendar-month").value);
   } catch (e) { if (token === state.calToken) body.innerHTML = '<tr><td colspan="5" class="empty-state">Calendrier indisponible pour le moment.</td></tr>'; }
+}
+function topCell(g) {
+  if (!g.final) return "—";
+  const l = state.tops.get(norm(g.raw.home_team.full_name) + "|" + norm(g.raw.visitor_team.full_name)) || [];
+  const t = l.find(x => Math.abs(Date.parse(x[0] + "T12:00:00Z") - g.ts) < 20 * 36e5);
+  if (!t || !t[3]) return "—";
+  const parts = String(t[3]).trim().split(/\s+/);
+  return `${esc(parts[0][0])}. ${esc(parts.slice(1).join(" ") || parts[0])} <span class="muted">· ${t[4]} pts</span>`;
+}
+async function loadTops(m) {
+  const c = state.topsLoaded.get(m);
+  if (c && Date.now() - c < 5 * 60 * 1000) return;
+  try {
+    const r = await fetch("/api/tops?m=" + m); if (!r.ok) return;
+    const d = await r.json();
+    for (const x of d.tops || []) { const k = norm(x[1]) + "|" + norm(x[2]); const l = state.tops.get(k) || []; if (!l.some(y => y[0] === x[0])) l.push(x); state.tops.set(k, l); }
+    state.topsLoaded.set(m, Date.now());
+    const sel = $("#calendar-month"); if (sel && sel.value === m) renderCalendar();
+  } catch (e) { /* le meilleur marqueur reste affiché « — » */ }
 }
 function renderCalendar() {
   const filter = $("#calendar-filter").value; let games = state.calGames || [];
   if (filter === "played") games = games.filter(g => g.final);
   else if (filter === "upcoming") games = games.filter(g => !g.final);
-  const rows = games.map(g => `<tr><td>${whenFr(g)}</td><td class="team-pair">${esc(g.away)} <span class="muted">@</span> ${esc(g.home)}</td><td>${g.final ? `${g.a} – ${g.h}` : g.live ? `${g.a} – ${g.h} <span class="live-label">${esc(g.liveLabel)}</span>` : '<span class="muted">À venir</span>'}</td><td>—</td><td>${g.final ? `<button class="table-action" data-game="${g.id}">Feuille de match</button>` : "—"}</td></tr>`).join("");
+  const rows = games.map(g => `<tr><td>${whenFr(g)}</td><td class="team-pair">${esc(g.away)} <span class="muted">@</span> ${esc(g.home)}</td><td>${g.final ? `${g.a} – ${g.h}` : g.live ? `${g.a} – ${g.h} <span class="live-label">${esc(g.liveLabel)}</span>` : '<span class="muted">À venir</span>'}</td><td>${topCell(g)}</td><td>${g.final ? `<button class="table-action" data-game="${g.id}">Feuille de match</button>` : "—"}</td></tr>`).join("");
   $("#calendar-body").innerHTML = rows || '<tr><td colspan="5" class="empty-state">Aucun match dans ce filtre pour ce mois.</td></tr>';
 }
 
@@ -386,6 +411,24 @@ function renderTeams() {
 const POS = { G: "Arrière", F: "Ailier", C: "Pivot" };
 const posFr = p => p ? p.split("-").map(x => POS[x] || x).join(" / ") : "—";
 const heightFr = h => { const m = /^(\d+)-(\d+)$/.exec(h || ""); if (!m) return "—"; return (Math.round((+m[1] * 12 + +m[2]) * 2.54) / 100).toFixed(2).replace(".", ",") + " m"; };
+async function teamStarters(t) {
+  const out = new Set();
+  if (state.noStats) return out;
+  try {
+    let g = [...state.windowGames].reverse().find(x => x.final && (x.homeId === t.id || x.awayId === t.id));
+    if (!g) {
+      const r = await nba("games", { "team_ids[]": t.id, start_date: ymd(addDays(-14)), end_date: ymd(new Date()), per_page: 20 });
+      g = (r.data || []).map(normGame).filter(x => x.final).sort((a, b) => b.ts - a.ts)[0];
+      if (g) state.gameIndex.set(g.id, g);
+    }
+    if (!g) return out;
+    const m = await hlMatch(g); if (!m) return out;
+    const l = await hl("lineups/" + m.id, {}, Date.now() - g.ts > OLD_MS);
+    const side = g.homeId === t.id ? l.home : l.away;
+    for (const p of (side && side.lineup) || []) if (p.isStarter) out.add(norm(p.player || ""));
+  } catch (e) { /* cinq majeur indisponible : l'effectif s'affiche sans */ }
+  return out;
+}
 async function openTeam(id) {
   const t = state.teams && state.teams.find(x => x.id === +id); if (!t) return;
   state.activeTeam = t.id;
@@ -394,9 +437,15 @@ async function openTeam(id) {
   const r = hlRecords().get(norm(t.full_name));
   det.innerHTML = `<div class="team-detail-head"><button class="back-button" id="team-back">← Toutes les équipes</button><div><p class="eyebrow">FRANCHISE NBA · ${(CONF[t.conference] || "").toUpperCase()}</p><h2>${esc(t.full_name)}</h2>${r ? `<p class="section-subtitle">Bilan : ${r.w} V – ${r.l} D · Série en cours : ${esc(r.streak)}</p>` : ""}</div></div><div id="roster" class="loading">Chargement de l'effectif…</div>`;
   try {
-    const players = (await fetchAll("players", { "team_ids[]": t.id }, 3)).sort((a, b) => a.last_name.localeCompare(b.last_name));
+    const [raw, starters] = await Promise.all([fetchAll("players", { "team_ids[]": t.id }, 3), teamStarters(t)]);
     if (state.activeTeam !== t.id) return;
-    $("#roster").outerHTML = `<div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>Joueur</th><th>N°</th><th>Poste</th><th>Taille</th><th>Pays</th></tr></thead><tbody>${players.map(p => `<tr><td>${esc(fullName(p))}</td><td>${esc(p.jersey_number || "—")}</td><td>${esc(posFr(p.position))}</td><td>${heightFr(p.height)}</td><td>${esc(p.country || "—")}</td></tr>`).join("")}</tbody></table></div></div><p class="section-subtitle">Moyennes par match (PTS, REB, PDS, INT, CTR) : disponibles avec l'offre payante de BallDontLie.</p>`;
+    const rank = p => { const c = String(p.position || "").charAt(0); return c === "G" ? 0 : c === "F" ? 1 : c === "C" ? 2 : 3; };
+    const hasData = p => !!(p.jersey_number || p.position || p.height);
+    const isSt = p => starters.has(norm(fullName(p)));
+    const players = raw.filter(p => p.first_name || p.last_name).sort((x, y) => (isSt(y) - isSt(x)) || (hasData(y) - hasData(x)) || (rank(x) - rank(y)) || x.last_name.localeCompare(y.last_name));
+    const lastSt = players.reduce((acc, p, i) => isSt(p) ? i : acc, -1);
+    const rows = players.map((p, i) => `<tr class="${isSt(p) ? "starter" : ""}${i === lastSt && lastSt < players.length - 1 ? " starter-last" : ""}"><td>${esc(fullName(p))}</td><td>${esc(p.jersey_number || "—")}</td><td>${esc(posFr(p.position))}</td><td>${heightFr(p.height)}</td><td>${esc(p.country || "—")}</td></tr>`).join("");
+    $("#roster").outerHTML = `<div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>Joueur</th><th>N°</th><th>Poste</th><th>Taille</th><th>Pays</th></tr></thead><tbody>${rows}</tbody></table></div></div><p class="section-subtitle">${starters.size ? "Les cinq premiers joueurs sont le cinq majeur du dernier match. " : ""}Moyennes par match (PTS, REB, PDS, INT, CTR) : bientôt disponibles.</p>`;
   } catch (e) { if (state.activeTeam === t.id) $("#roster").textContent = "Effectif indisponible pour le moment."; }
 }
 
@@ -552,6 +601,7 @@ async function refreshData() {
     await loadNightStats(); showFrench(); showTop();
     if ($("#page-stats").classList.contains("active")) showLeaders();
     setNotice(true);
+    loadSeasonLeaders(); // fait avancer le calcul des statistiques de saison à chaque visite (réponse ignorée ici)
   } catch (e) {
     setNotice(false);
     $("#ticker-track").innerHTML = '<div class="empty-state">Scores indisponibles pour le moment.</div>';
