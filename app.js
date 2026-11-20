@@ -10,6 +10,37 @@ const FRENCH = ["Victor Wembanyama", "Zaccharie Risacher", "Alex Sarr", "Rudy Go
 const CONF = { East: "Est", West: "Ouest" };
 const news = [["ANALYSE", "Les nouvelles tendances tactiques à suivre cette saison", "Décryptage des ajustements qui changent le visage du jeu."], ["FOCUS JOUEUR", "Les jeunes talents qui prennent une nouvelle dimension", "Tour d'horizon des progressions à surveiller."], ["DANS LA LIGUE", "La course aux premières places est lancée", "Les premières tendances de la saison se dessinent."]];
 
+// Programmations françaises vérifiées et maintenues éditorialement.
+// Les rencontres non présentes ici restent « à confirmer » : ne pas déduire beIN par défaut.
+const BROADCASTS = [
+  { date: "2026-10-23", teams: ["NYK","BOS"], channel: "Prime Video", source: "Inside Basket", url: "https://www.insidebasket.com/actu/nba-sur-prime-video-le-programme-complet-de-la-saison-2026-2027-en-france.html" },
+  { date: "2026-10-24", teams: ["HOU","SAS"], channel: "Prime Video", source: "Inside Basket", url: "https://www.insidebasket.com/actu/nba-sur-prime-video-le-programme-complet-de-la-saison-2026-2027-en-france.html" },
+  { date: "2026-10-31", teams: ["NYK","PHI"], channel: "Prime Video", source: "Inside Basket", url: "https://www.insidebasket.com/actu/nba-sur-prime-video-le-programme-complet-de-la-saison-2026-2027-en-france.html" },
+  { date: "2026-10-31", teams: ["LAL","GSW"], channel: "Prime Video", source: "Inside Basket", url: "https://www.insidebasket.com/actu/nba-sur-prime-video-le-programme-complet-de-la-saison-2026-2027-en-france.html" },
+  { date: "2026-11-28", teams: ["MIA","NYK"], channel: "Prime Video", source: "Basket USA", url: "https://www.basketusa.com/news/952020/quels-matchs-nba-seront-diffuses-sur-prime-video-cette-saison/" },
+  { date: "2026-11-28", teams: ["LAL","SAS"], channel: "Prime Video", source: "Basket USA", url: "https://www.basketusa.com/news/952020/quels-matchs-nba-seront-diffuses-sur-prime-video-cette-saison/" },
+  { date: "2026-11-08", teams: ["CHI","PHI"], channel: "Prime Video", source: "Basket USA", url: "https://www.basketusa.com/news/955742/programme-du-soir-sixers-bulls-en-prime-time-lakers-et-celtics-sur-bein-sports/" },
+  { date: "2026-11-09", teams: ["DET","LAL"], channel: "beIN SPORTS 2", source: "Basket USA", url: "https://www.basketusa.com/news/955742/programme-du-soir-sixers-bulls-en-prime-time-lakers-et-celtics-sur-bein-sports/" },
+  { date: "2026-11-09", teams: ["MIL","BOS"], channel: "beIN SPORTS 1", source: "Basket USA", url: "https://www.basketusa.com/news/955742/programme-du-soir-sixers-bulls-en-prime-time-lakers-et-celtics-sur-bein-sports/" },
+  { date: "2026-11-15", teams: ["PHI","IND"], channel: "Prime Video", source: "Basket USA", url: "https://www.basketusa.com/news/957642/programme-du-soir-les-sixers-defient-les-pacers-des-19h00-sur-prime-video/" },
+  { date: "2026-11-15", teams: ["PHX","LAL"], channel: "beIN SPORTS 1", source: "Basket USA", url: "https://www.basketusa.com/news/957642/programme-du-soir-les-sixers-defient-les-pacers-des-19h00-sur-prime-video/" }
+];
+const broadcastFor = g => {
+  const pair = [g.away, g.home].sort().join("|");
+  const localDate = ymd(g.when);
+  return BROADCASTS.find(x => x.date === localDate && x.teams.slice().sort().join("|") === pair) || null;
+};
+const broadcastMarkup = (g, compact = false) => {
+  const b = broadcastFor(g);
+  return b ? `<a class="broadcast-chip ${/prime/i.test(b.channel) ? "prime" : "bein"}" href="${b.url}" target="_blank" rel="noopener" title="Programmation confirmée · ${esc(b.source)}">${esc(b.channel)}</a>` : `<span class="broadcast-pending">${compact ? "Diffusion à confirmer" : "À confirmer"}</span>`;
+};
+function showBroadcasts() {
+  const el = $("#broadcast-tonight"); if (!el) return;
+  const list = state.windowGames.filter(g => !g.final && broadcastFor(g)).sort((a,b) => a.ts-b.ts).slice(0,5);
+  el.innerHTML = list.map(g => `<div class="broadcast-row"><div><b>${esc(g.away)} @ ${esc(g.home)}</b><small>${g.live ? '<span class="live-label">● EN DIRECT</span>' : whenFr(g)}</small></div>${broadcastMarkup(g)}</div>`).join("") || '<div class="empty-state">Aucune diffusion confirmée dans les prochains matchs chargés.</div>';
+}
+
+
 const state = { tickerMode: "results", countdown: 300, windowGames: [], teams: null, season: null, noStats: false, nightStats: null, boxCache: new Map(), hlDays: new Map(), modalToken: 0, calLimit: 60, activeTeam: null, playoffToken: 0, gameIndex: new Map(), calMonths: new Map(), calGames: null, calToken: 0, sl: null, statsMode: "night", statsModeSet: false, tops: new Map(), topsLoaded: new Map() };
 
 /* ---------- Styles additionnels (états de chargement, lignes cliquables, détails de séries) ---------- */
@@ -245,7 +276,7 @@ function ensureSeason() {
 /* ---------- Bandeau de scores + accueil ---------- */
 function gameCard(g) {
   const scored = g.final || g.live;
-  return `<button class="ticker-game" data-game="${g.id}"><span class="teams"><b class="${g.final && g.a > g.h ? "winner" : ""}">${esc(g.away)}</b><b class="${g.final && g.h > g.a ? "winner" : ""}">${esc(g.home)}</b></span><span class="score">${scored ? `${g.a}<br>${g.h}` : "—<br>—"}</span><small class="${g.live ? "live-label" : ""}">${g.final ? "Terminé" : g.live ? esc(g.liveLabel) : whenFr(g)}</small></button>`;
+  return `<button class="ticker-game" data-game="${g.id}"><span class="teams"><b class="${g.final && g.a > g.h ? "winner" : ""}">${esc(g.away)}</b><b class="${g.final && g.h > g.a ? "winner" : ""}">${esc(g.home)}</b></span><span class="score">${scored ? `${g.a}<br>${g.h}` : "—<br>—"}</span><small class="${g.live ? "live-label" : ""}">${g.final ? "Terminé" : g.live ? esc(g.liveLabel) : whenFr(g)}${broadcastFor(g) ? " · " + esc(broadcastFor(g).channel) : ""}</small></button>`;
 }
 function showTicker() {
   const games = state.tickerMode === "results" ? lastNight() : state.windowGames.filter(g => !g.final).slice(0, 12);
@@ -381,8 +412,8 @@ function renderCalendar() {
   const filter = $("#calendar-filter").value; let games = state.calGames || [];
   if (filter === "played") games = games.filter(g => g.final);
   else if (filter === "upcoming") games = games.filter(g => !g.final);
-  const rows = games.map(g => `<tr><td>${whenFr(g)}</td><td class="team-pair">${esc(g.away)} <span class="muted">@</span> ${esc(g.home)}</td><td>${g.final ? `${g.a} – ${g.h}` : g.live ? `${g.a} – ${g.h} <span class="live-label">${esc(g.liveLabel)}</span>` : '<span class="muted">À venir</span>'}</td><td>${topCell(g)}</td><td>${g.final ? `<button class="table-action" data-game="${g.id}">Feuille de match</button>` : "—"}</td></tr>`).join("");
-  $("#calendar-body").innerHTML = rows || '<tr><td colspan="5" class="empty-state">Aucun match dans ce filtre pour ce mois.</td></tr>';
+  const rows = games.map(g => `<tr><td>${whenFr(g)}</td><td class="team-pair">${esc(g.away)} <span class="muted">@</span> ${esc(g.home)}</td><td>${g.final ? `${g.a} – ${g.h}` : g.live ? `${g.a} – ${g.h} <span class="live-label">${esc(g.liveLabel)}</span>` : '<span class="muted">À venir</span>'}</td><td>${topCell(g)}</td><td>${broadcastMarkup(g)}</td><td>${g.final ? `<button class="table-action" data-game="${g.id}">Feuille de match</button>` : "—"}</td></tr>`).join("");
+  $("#calendar-body").innerHTML = rows || '<tr><td colspan="6" class="empty-state">Aucun match dans ce filtre pour ce mois.</td></tr>';
 }
 
 /* ---------- Équipes ---------- */
@@ -588,7 +619,7 @@ function initTheme() { const saved = localStorage.getItem("ltb-theme"); if (save
 function updateThemeButton() { const light = document.body.dataset.theme === "light"; $(".theme-icon").textContent = light ? "☾" : "☼"; $(".theme-label").textContent = light ? "Mode sombre" : "Mode clair"; $("#theme-toggle").setAttribute("aria-label", light ? "Passer en mode sombre" : "Passer en mode clair"); }
 function setNotice(ok) {
   const n = $(".demo-notice"); if (!n) return;
-  n.innerHTML = ok ? `<span>BÊTA</span> Scores, calendrier et classement via BallDontLie, feuilles de match via Highlightly.${state.noStats ? " Statistiques individuelles momentanément indisponibles." : ""} Les articles de la rubrique actualités sont des exemples.` : "<span>HORS LIGNE</span> Les données NBA sont momentanément indisponibles. Réessaie dans quelques instants.";
+  n.innerHTML = ok ? `<span>BÊTA</span> Scores, calendrier et classement via BallDontLie, feuilles de match via Highlightly. Diffuseurs : programmation française vérifiée.${state.noStats ? " Statistiques individuelles momentanément indisponibles." : ""} Les articles de la rubrique actualités sont des exemples.` : "<span>HORS LIGNE</span> Les données NBA sont momentanément indisponibles. Réessaie dans quelques instants.";
 }
 function setHeadline() {
   const el = $("#page-home .section-heading .eyebrow");
@@ -598,7 +629,7 @@ async function refreshData() {
   memCache.clear(); state.countdown = 300;
   try {
     await loadWindow(); showTicker(); showScores();
-    await loadNightStats(); showFrench(); showTop();
+    await loadNightStats(); showFrench(); showTop(); showBroadcasts();
     if ($("#page-stats").classList.contains("active")) showLeaders();
     setNotice(true);
     loadSeasonLeaders(); // fait avancer le calcul des statistiques de saison à chaque visite (réponse ignorée ici)
@@ -618,7 +649,7 @@ function init() {
   initTheme(); setHeadline(); showNews();
   $("#ticker-track").innerHTML = '<div class="empty-state">Chargement des scores…</div>';
   $("#home-scores").innerHTML = '<div class="loading">Chargement des scores…</div>';
-  showFrench(); showTop();
+  showFrench(); showTop(); showBroadcasts();
   $("#year").textContent = new Date().getFullYear();
   for (let y = 2026; y >= 1980; y--) $("#playoff-year").insertAdjacentHTML("beforeend", `<option value="${y}">${y} · Playoffs</option>`);
   $("#bracket").innerHTML = ""; $("#series-detail").innerHTML = "";
@@ -641,7 +672,6 @@ function init() {
   $("#theme-toggle").onclick = () => { document.body.dataset.theme = document.body.dataset.theme === "dark" ? "light" : "dark"; localStorage.setItem("ltb-theme", document.body.dataset.theme); updateThemeButton(); };
   $("#mobile-menu").onclick = () => $(".main-nav").classList.toggle("open");
   $("#modal-close").onclick = () => $("#match-modal").close();
-  $("#read-feature").onclick = () => alert("Le contenu éditorial sera administrable dans une prochaine version.");
   $("#all-news").onclick = () => alert("La rubrique actualités sera enrichie lors de la prochaine étape.");
   $("#news-grid").addEventListener("click", e => { if (e.target.closest("[data-news]")) alert("Article de démonstration : le système de publication sera ajouté ultérieurement."); });
 }
