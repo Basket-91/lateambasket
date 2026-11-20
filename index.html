@@ -42,26 +42,27 @@
   </header>
 
   <main class="container">
-    <div class="demo-notice"><span>MODE APERÇU</span> Les données affichées sont des exemples de mise en page, pas des scores NBA en direct. Le branchement API sera ajouté dans une prochaine étape.</div>
+    <div class="demo-notice"><span>ÉDITION NBA</span> Scores, calendrier et statistiques sont alimentés par les API connectées. Les diffuseurs sont indiqués lorsqu’une programmation française est confirmée.</div>
 
     <section class="page active" id="page-home">
       <div class="section-heading"><div><p class="eyebrow">SAMEDI 14 NOVEMBRE 2026 · ÉDITION DU JOUR</p><h1>Le basket, <em>sans détour.</em></h1><p class="section-subtitle">Toute l'actualité NBA, les résultats et les performances à ne pas manquer.</p></div><span class="edition-pill">ÉDITION DU MATIN</span></div>
-      <div class="hero-grid">
+      <div class="hero-grid home-hero-grid">
+        <article class="feature-card"><div class="feature-kicker">LA NBA EN DIRECT · ÉDITION FRANÇAISE <span>✦</span></div><div class="feature-content"><span class="tag">LA TEAM BASKET</span><h2>La NBA, au plus près de l’action.</h2><p>Scores en direct, performances, calendrier et diffuseurs français : toute la ligue au même endroit.</p><button class="primary-button" data-goto="calendar">Explorer les matchs <span>↗</span></button></div><div class="feature-orbit" aria-hidden="true"><span>NBA</span></div></article>
         <section class="panel score-panel"><div class="panel-heading"><div><span class="eyebrow">LES RÉSULTATS</span><h2>La nuit en scores</h2></div><button class="text-button" data-goto="calendar">Tout voir →</button></div><div id="home-scores" class="score-list"></div></section>
-        <article class="feature-card"><div class="feature-kicker">LE RÉCAP' DE LA NUIT <span>✦</span></div><div class="feature-content"><span class="tag">À LA UNE</span><h2>Une nouvelle nuit pleine de promesses sur les parquets NBA</h2><p>Les affiches se suivent et les performances individuelles continuent de faire vibrer la ligue. Retrouvez ici le fil des temps forts, les tendances et les joueurs à suivre.</p><button class="primary-button" id="read-feature">Lire le récap' <span>↗</span></button></div><div class="feature-orbit" aria-hidden="true"><span>NBA</span></div></article>
+        
       </div>
       <div class="content-layout">
         <div class="main-column">
-          <section class="content-section"><div class="section-title-row"><div><p class="eyebrow">FRENCH CONNECTION</p><h2>Le baromètre des Français</h2></div><span class="subtle-label">PERFORMANCES · EXEMPLE</span></div><div class="french-grid" id="french-performances"></div></section>
+          <section class="content-section"><div class="section-title-row"><div><p class="eyebrow">FRENCH CONNECTION</p><h2>Le baromètre des Français</h2></div><span class="subtle-label">PERFORMANCES · API</span></div><div class="french-grid" id="french-performances"></div></section>
           <section class="content-section"><div class="section-title-row"><div><p class="eyebrow">LE FIL NBA</p><h2>Dernières actualités</h2></div><button class="text-button" id="all-news">Toutes les actus →</button></div><div class="news-grid" id="news-grid"></div></section>
         </div>
-        <aside class="sidebar panel"><div class="panel-heading"><div><p class="eyebrow">LES INDIVIDUALITÉS</p><h2>🔥 Top stats de la nuit</h2></div><span class="mini-live">APERÇU</span></div><div id="top-performances" class="top-list"></div><button class="outline-button full" data-goto="stats">Voir les leaders →</button></aside>
+        <aside class="sidebar panel"><div class="panel-heading"><div><p class="eyebrow">LES INDIVIDUALITÉS</p><h2>🔥 Top stats de la nuit</h2></div><span class="mini-live">APERÇU</span></div><div id="top-performances" class="top-list"></div><button class="outline-button full" data-goto="stats">Voir les leaders →</button><div class="sidebar-divider"></div><div class="panel-heading broadcast-heading"><div><p class="eyebrow">OÙ REGARDER EN FRANCE</p><h2>Diffusions confirmées</h2></div><span class="mini-live">FR</span></div><div id="broadcast-tonight" class="broadcast-list"></div><p class="broadcast-footnote">Programmation affichée uniquement lorsqu’elle est confirmée par une source. Les autres rencontres restent disponibles via le League Pass selon les restrictions applicables.</p></aside>
       </div>
     </section>
 
     <section class="page" id="page-calendar">
       <div class="page-heading"><div><p class="eyebrow">SAISON NBA 2026-27</p><h1>Le calendrier</h1><p class="section-subtitle">Les résultats et les prochaines affiches, à l'heure française.</p></div><select id="calendar-filter" class="select-control" aria-label="Filtrer les matchs"><option value="all">Tous les matchs</option><option value="played">Matchs terminés</option><option value="upcoming">Matchs à venir</option></select></div>
-      <div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>Date / heure (FR)</th><th>Rencontre</th><th>Score / statut</th><th>Meilleur marqueur</th><th></th></tr></thead><tbody id="calendar-body"></tbody></table></div></div>
+      <div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>Date / heure (FR)</th><th>Rencontre</th><th>Score / statut</th><th>Meilleur marqueur</th><th>Diffusion FR</th><th></th></tr></thead><tbody id="calendar-body"></tbody></table></div></div>
     </section>
 
     <section class="page" id="page-teams">
