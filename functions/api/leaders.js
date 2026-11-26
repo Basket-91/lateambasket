@@ -5,8 +5,9 @@
 const BASE = "https://nba.highlightly.net/";
 const BATCH = 20;                  // feuilles traitées par mise à jour (reste sous la limite de 50 sous-requêtes du plan gratuit Cloudflare)
 const DAILY_BUDGET = 70;           // requêtes Highlightly max par jour pour ce calcul (quota gratuit : 100/jour ; monte-le avec un plan payant)
-const LIST_EVERY = 30 * 60 * 1000; // actualisation de la liste des matchs terminés (si plus rien en attente)
-const MIN_RATIO = 0.5;             // un joueur apparaît s'il a joué au moins 50 % du nombre max de matchs
+const LIST_EVERY = 24 * 36e5;      // relistage complet de la saison (auto-réparation) une fois par jour
+const RECENT_EVERY = 10 * 60 * 1000; // détection des matchs qui viennent de se terminer (via BallDontLie, gratuit)
+const MIN_RATIO = 0.7;             // comme sur nba.com : un joueur est classé s'il a joué au moins 70 % des matchs
 
 const STAT = { min: "Total Minutes Played", pts: "Total Points Scored", reb: "Total Rebounds", ast: "Total Assists", stl: "Total Steals", blk: "Total Blocks" };
 const j = (o, status = 200, cc = "no-store") => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json", "Cache-Control": cc } });
@@ -40,7 +41,8 @@ function addBox(st, raw, m) {
       const pts = pstat(p, STAT.pts);
       if (!best || pts > best.pts) best = { name: p.player.name || "", pts, team: name };
       if (m[7]) continue; // feuille déjà comptée dans les moyennes : on ne recalcule que le meilleur marqueur
-      const rec = st.players[p.player.id] || (st.players[p.player.id] = { n: p.player.name, t: name, d: "", g: 0, pts: 0, reb: 0, ast: 0, stl: 0, blk: 0 });
+      const pk = normName(p.player.name || p.player.id);
+      const rec = st.players[pk] || (st.players[pk] = { n: p.player.name, t: name, d: "", g: 0, pts: 0, reb: 0, ast: 0, stl: 0, blk: 0 });
       rec.g++;
       for (const k of ["pts", "reb", "ast", "stl", "blk"]) rec[k] += pstat(p, STAT[k]);
       if (m[1] >= rec.d) { rec.d = m[1]; rec.t = name; }
@@ -56,33 +58,75 @@ export async function onRequestGet({ env, waitUntil }) {
   const season = hlSeason(), key = "season:" + season;
   const st = (await kv.get(key, "json")) || { season, done: {}, pending: [], players: {}, tops: {}, listedAt: 0, total: 0, budget: { day: "", used: 0 } };
   if (!st.tops) { st.tops = {}; st.listedAt = 0; } // ancienne version : on relistera pour retrouver les meilleurs marqueurs
+  if (st.v !== 2) { // migration : un même joueur pouvait avoir plusieurs identifiants -> on regroupe par nom (somme exacte)
+    const by = {};
+    for (const p of Object.values(st.players)) {
+      const k = normName(p.n), r = by[k];
+      if (!r) { by[k] = { ...p }; continue; }
+      r.g += p.g; for (const f of ["pts", "reb", "ast", "stl", "blk"]) r[f] += p[f];
+      if (p.d >= r.d) { r.d = p.d; r.t = p.t; }
+    }
+    st.players = by; st.v = 2; waitUntil(kv.put(key, JSON.stringify(st)));
+  }
   const today = new Date().toISOString().slice(0, 10);
   if (st.budget.day !== today) st.budget = { day: today, used: 0 };
 
   // 1. Réponse immédiate à partir de ce qui est déjà stocké (lecture KV uniquement : rapide pour tous les visiteurs)
   const ps = Object.values(st.players);
   const maxG = ps.reduce((a, p) => Math.max(a, p.g), 0);
-  const minG = Math.max(1, Math.floor(maxG * MIN_RATIO));
+  const minG = Math.max(1, Math.ceil(maxG * MIN_RATIO));
   const leaders = {};
   for (const k of ["pts", "ast", "reb", "blk", "stl"]) {
     leaders[k] = ps.filter(p => p.g >= minG).map(p => ({ name: p.n, team: p.t, g: p.g, v: Math.round(p[k] / p.g * 10) / 10 })).sort((a, b) => b.v - a.v).slice(0, 5);
   }
   const french = ps.filter(p => FRENCH.includes(normName(p.n))).map(p => ({ name: p.n, team: p.t, g: p.g }));
-  const res = j({ season, status: "ok", gamesCounted: Object.keys(st.done).length, gamesTotal: st.total, minGames: minG, budgetUsed: st.budget.used, budgetMax: DAILY_BUDGET, leaders, french }, 200, "public, max-age=60");
+  const through = ps.reduce((a, p) => (p.d > a ? p.d : a), "");
+  const res = j({ season, status: "ok", gamesCounted: Object.keys(st.done).length, gamesTotal: st.total, minGames: minG, budgetUsed: st.budget.used, budgetMax: DAILY_BUDGET, leaders, french, through }, 200, "public, max-age=60");
 
   // 2. Mise à jour en arrière-plan (le visiteur n'attend jamais les appels à Highlightly)
-  const listStale = Date.now() - st.listedAt > (st.pending.length ? 12 * 36e5 : LIST_EVERY);
-  const needsWork = env.HIGHLIGHTLY_KEY && st.budget.used < DAILY_BUDGET && (listStale || st.pending.length > 0);
+  const listStale = Date.now() - st.listedAt > LIST_EVERY, recentDue = Date.now() - (st.recentAt || 0) > RECENT_EVERY;
+  const needsWork = env.HIGHLIGHTLY_KEY && st.budget.used < DAILY_BUDGET && (listStale || recentDue || st.pending.length > 0);
   if (needsWork && !(await kv.get("lock:" + season))) {
     await kv.put("lock:" + season, "1", { expirationTtl: 60 });
-    waitUntil(update(env, kv, key, season, st, listStale));
+    waitUntil(update(env, kv, key, season, st, listStale, recentDue));
   }
   return res;
 }
 
-async function update(env, kv, key, season, st, listStale) {
+const pushPending = (st, seen, m) => {
+  if (seen.has(m.id)) return;
+  const row = [m.id, String(m.date).slice(0, 10), m.homeTeam.id, m.homeTeam.displayName, m.awayTeam.id, m.awayTeam.displayName, 0, 0];
+  if (!st.done[m.id]) { st.pending.push(row); seen.add(m.id); }
+  else if (!st.tops[m.id]) { row[7] = 1; st.pending.push(row); seen.add(m.id); }
+};
+// Détecte les matchs qui viennent de se terminer : BallDontLie (gratuit) les repère, Highlightly n'est interrogé que si besoin
+async function recent(env, st) {
+  const day = n => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+  const u = new URL("https://api.balldontlie.io/v1/games");
+  u.searchParams.set("start_date", day(-2)); u.searchParams.set("end_date", day(0)); u.searchParams.set("per_page", "100");
+  const r = await fetch(u, { headers: { Authorization: env.BALLDONTLIE_KEY } });
+  if (!r.ok) return;
+  const fin = ((await r.json()).data || []).filter(g => /final/i.test(String(g.status)));
+  st.bdlSeen = st.bdlSeen || {};
+  const fresh = fin.filter(g => !st.bdlSeen[g.id]);
+  const seen = new Set(st.pending.map(x => x[0]));
+  for (const d of [...new Set(fresh.map(g => String(g.date).slice(0, 10)))].slice(0, 3)) {
+    if (st.budget.used >= DAILY_BUDGET) break;
+    const list = (await hl(env, "matches", { league: "NBA", date: d, timezone: "America/New_York", limit: 100 })).data || [];
+    st.budget.used++;
+    const nm = x => normName(x || "");
+    for (const m of list) {
+      if (!(m.state && m.state.description === "Finished")) continue;
+      pushPending(st, seen, m);
+      for (const g of fresh) if (nm(g.home_team.full_name) === nm(m.homeTeam.displayName) && nm(g.visitor_team.full_name) === nm(m.awayTeam.displayName) && Math.abs(Date.parse(String(g.date).slice(0, 10)) - Date.parse(d)) < 2 * 864e5) st.bdlSeen[g.id] = 1;
+    }
+  }
+}
+
+async function update(env, kv, key, season, st, listStale, recentDue) {
   let changed = false;
   try {
+    if (recentDue && env.BALLDONTLIE_KEY) { st.recentAt = Date.now(); changed = true; try { await recent(env, st); } catch (e) { /* on retentera */ } }
     // liste des matchs terminés de la saison
     if (listStale) {
       const seen = new Set(st.pending.map(x => x[0]));
@@ -94,9 +138,7 @@ async function update(env, kv, key, season, st, listStale) {
         for (const m of list) {
           if (!(m.state && m.state.description === "Finished") || seen.has(m.id)) continue;
           finished++;
-          const row = [m.id, String(m.date).slice(0, 10), m.homeTeam.id, m.homeTeam.displayName, m.awayTeam.id, m.awayTeam.displayName, 0, 0];
-          if (!st.done[m.id]) { st.pending.push(row); seen.add(m.id); }
-          else if (!st.tops[m.id]) { row[7] = 1; st.pending.push(row); seen.add(m.id); } // déjà compté, il manque juste le meilleur marqueur
+          pushPending(st, seen, m);
         }
         if (list.length < 100) break;
         off += 100;
@@ -118,7 +160,7 @@ async function update(env, kv, key, season, st, listStale) {
         if (r.status === "fulfilled" && addBox(st, r.value.raw, m)) { st.done[m[0]] = 1; doneNow.add(m[0]); return; }
         if (r.status === "rejected" && [401, 403, 429].includes(r.reason && r.reason.status)) { stop = true; return; }
         m[6] = (m[6] || 0) + 1;
-        if (m[6] >= 3) { st.done[m[0]] = 1; st.tops[m[0]] = [m[1], m[3], m[5], "", 0, ""]; doneNow.add(m[0]); } // feuille toujours vide : on l'abandonne
+        if (m[6] >= 6) { st.done[m[0]] = 1; st.tops[m[0]] = [m[1], m[3], m[5], "", 0, ""]; doneNow.add(m[0]); } // feuille toujours vide : on l'abandonne
       });
     }
     if (batch.length) { st.pending = st.pending.filter(m => !doneNow.has(m[0])); changed = true; }

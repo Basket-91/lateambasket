@@ -269,14 +269,15 @@ function bestScorer(g) {
 }
 function gameCard(g) {
   const scored = g.final || g.live, b = broadcastFor(g), recs = hlRecords();
-  const stat = g.final ? '<span class="tc-state final">Final</span>' : g.live ? '<span class="tc-state live">In progress</span>' : `<span class="tc-state up">${esc(whenFr(g))}</span>`;
+  const stat = g.final ? '<span class="tc-state final">Final</span>' : g.live ? '<span class="tc-state live">In progress</span>' : `<span class="tc-state up">${esc(fmtDay(g.when))}</span>`;
+  const time = g.hasTime ? `<span class="tc-time">${esc(fmtTime(g.when))}</span>` : "";
   const rec = id => { const r = recs.get(norm(id)); return r ? `${r.w}-${r.l}` : ""; };
   const row = (ab, sc, lose, full) => `<div class="tc-row${lose ? " lose" : ""}">${dot(ab)}<b>${esc(ab)}</b>${scored ? `<span class="sc">${sc ?? "—"}</span>` : `<span class="rec">${rec(full)}</span>`}</div>`;
   let foot;
   if (g.final) { const t = bestScorer(g); foot = t ? `<div class="tc-foot tc-best">★ ${esc(t.name)} : ${t.pts} pts</div>` : '<div class="tc-foot tc-pend">Voir la feuille de match</div>'; }
   else if (g.live) foot = `<div class="tc-foot tc-live-info">${esc(g.liveLabel)}</div>`;
-  else foot = `<div class="tc-foot">${b ? tvChip(b) : '<span class="tc-pend">Diffusion FR à confirmer</span>'}</div>`;
-  return `<button class="tcard" data-game="${g.id}"><div class="tc-head">${stat}${scored && b ? tvChip(b, false) : ""}</div>${row(g.away, g.a, g.final && g.a < g.h, g.raw.visitor_team.full_name)}${row(g.home, g.h, g.final && g.h < g.a, g.raw.home_team.full_name)}${foot}</button>`;
+  else foot = `<div class="tc-foot tc-when">${time}${b ? tvChip(b) : ""}</div>`;
+  return `<button class="tcard" data-game="${g.id}"><div class="tc-head">${stat}${scored ? `<span class="tc-right">${time}${b ? tvChip(b, false) : ""}</span>` : ""}</div>${row(g.away, g.a, g.final && g.a < g.h, g.raw.visitor_team.full_name)}${row(g.home, g.h, g.final && g.h < g.a, g.raw.home_team.full_name)}${foot}</button>`;
 }
 function showTicker() {
   const games = state.tickerMode === "results" ? [...state.windowGames.filter(g => g.live), ...lastNight()] : state.windowGames.filter(g => !g.final).slice(0, 14);
@@ -435,7 +436,7 @@ function hlRecords() {
 }
 function frenchByTeam() {
   const m = new Map(), f = (state.sl && state.sl.d && state.sl.d.french) || [];
-  f.forEach(p => { const k = norm(p.team || ""); if (!m.has(k)) m.set(k, []); m.get(k).push(p.name); });
+  f.forEach(p => { const k = norm(p.team || ""); if (!m.has(k)) m.set(k, []); const l = m.get(k); if (!l.some(n => norm(n) === norm(p.name))) l.push(p.name); });
   return m;
 }
 function renderTeams() {
@@ -513,7 +514,7 @@ async function showLeaders() {
   if (tg) { $$("button", tg).forEach(b => b.classList.toggle("active", b.dataset.mode === state.statsMode)); tg.hidden = !seasonOk; }
   if (state.statsMode === "season") {
     const abbrOf = n => { const t = state.teams && state.teams.find(x => norm(x.full_name) === norm(n || "")); return t ? t.abbreviation : (n || ""); };
-    if (sub) sub.textContent = `Moyennes par match · saison ${sl.season - 1}-${String(sl.season).slice(2)} · minimum ${sl.minGames} matchs joués` + (sl.gamesCounted < sl.gamesTotal ? ` · calcul en cours (${sl.gamesCounted} matchs sur ${sl.gamesTotal})` : "");
+    if (sub) sub.textContent = `Moyennes par match · saison ${sl.season - 1}-${String(sl.season).slice(2)} · minimum ${sl.minGames} matchs joués` + (sl.through ? ` · à jour jusqu'au ${fmtLong(sl.through)}` : "") + (sl.gamesCounted < sl.gamesTotal ? ` · calcul en cours (${sl.gamesCounted} matchs sur ${sl.gamesTotal})` : "");
     el.innerHTML = LEAD_CATS.map(([name, abbr, k]) => `<article class="leader-card"><h2>${name} <span class="muted">(${abbr})</span></h2>${(sl.leaders[k] || []).map((r, i) => `<div class="leader-row"><span class="muted">${i + 1}</span><span>${esc(r.name)} <span class="muted">${esc(abbrOf(r.team))}</span></span><b>${r.v.toFixed(1)}</b></div>`).join("")}</article>`).join("");
     return;
   }
