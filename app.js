@@ -1,4 +1,4 @@
-/* La Team Basket — app.js (V2 : données réelles BallDontLie via /api/nba) */
+/* La Team Basket — app.js (V3 : refonte, diffuseurs FR, tableau des playoffs) */
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const TZ = "Europe/Paris";
@@ -10,65 +10,50 @@ const FRENCH = ["Victor Wembanyama", "Zaccharie Risacher", "Alex Sarr", "Rudy Go
 const CONF = { East: "Est", West: "Ouest" };
 const news = [["ANALYSE", "Les nouvelles tendances tactiques à suivre cette saison", "Décryptage des ajustements qui changent le visage du jeu."], ["FOCUS JOUEUR", "Les jeunes talents qui prennent une nouvelle dimension", "Tour d'horizon des progressions à surveiller."], ["DANS LA LIGUE", "La course aux premières places est lancée", "Les premières tendances de la saison se dessinent."]];
 
-// Programmations françaises vérifiées et maintenues éditorialement.
-// Les rencontres non présentes ici restent « à confirmer » : ne pas déduire beIN par défaut.
+// Couleurs des équipes (points colorés), légèrement éclaircies pour le fond sombre.
+const TEAM_COLOR = { ATL:"#E03A3E", BOS:"#1B9A4F", BKN:"#9EA2A8", CHA:"#1D8FA6", CHI:"#CE1141", CLE:"#B0275B", DAL:"#0A6CC9", DEN:"#FEC524", DET:"#C8102E", GSW:"#FFC72C", HOU:"#CE1141", IND:"#FDBB30", LAC:"#4A7BD0", LAL:"#7B4FB8", MEM:"#5D76A9", MIA:"#C1233F", MIL:"#1F8F4E", MIN:"#3D8BCB", NOP:"#B59A5B", NYK:"#2E7DD1", OKC:"#007AC1", ORL:"#0077C0", PHI:"#1F7FD0", PHX:"#E56020", POR:"#E03A3E", SAC:"#8A5AC8", SAS:"#C4CED4", TOR:"#CE1141", UTA:"#F9A01B", WAS:"#E31837" };
+const dot = a => `<i class="dot" style="--c:${TEAM_COLOR[a] || "#7a8699"}"></i>`;
+const FLAG = '<span class="flag-fr" role="img" aria-label="France"></span>';
+const shortName = n => { const p = String(n || "").trim().split(/\s+/); return p.length > 1 ? p[0][0] + ". " + p.slice(1).join(" ") : (p[0] || ""); };
+
+// MVP des finales (1980 → 2026)
+const FMVP = { 1980:"Magic Johnson", 1981:"Cedric Maxwell", 1982:"Magic Johnson", 1983:"Moses Malone", 1984:"Larry Bird", 1985:"Kareem Abdul-Jabbar", 1986:"Larry Bird", 1987:"Magic Johnson", 1988:"James Worthy", 1989:"Joe Dumars", 1990:"Isiah Thomas", 1991:"Michael Jordan", 1992:"Michael Jordan", 1993:"Michael Jordan", 1994:"Hakeem Olajuwon", 1995:"Hakeem Olajuwon", 1996:"Michael Jordan", 1997:"Michael Jordan", 1998:"Michael Jordan", 1999:"Tim Duncan", 2000:"Shaquille O'Neal", 2001:"Shaquille O'Neal", 2002:"Shaquille O'Neal", 2003:"Tim Duncan", 2004:"Chauncey Billups", 2005:"Tim Duncan", 2006:"Dwyane Wade", 2007:"Tony Parker", 2008:"Paul Pierce", 2009:"Kobe Bryant", 2010:"Kobe Bryant", 2011:"Dirk Nowitzki", 2012:"LeBron James", 2013:"LeBron James", 2014:"Kawhi Leonard", 2015:"Andre Iguodala", 2016:"LeBron James", 2017:"Kevin Durant", 2018:"Kevin Durant", 2019:"Kawhi Leonard", 2020:"LeBron James", 2021:"Giannis Antetokounmpo", 2022:"Stephen Curry", 2023:"Nikola Jokić", 2024:"Jaylen Brown", 2025:"Shai Gilgeous-Alexander", 2026:"Jalen Brunson" };
+
+// Diffusions en France : fichier diffusions.json (à mettre à jour à la main ; beIN SPORTS annonce ~1 semaine à l'avance).
+// Chaque entrée : [coup d'envoi UTC, équipe, équipe, chaîne]
+const CH = { bein1: ["beIN SPORTS 1", "beIN 1", "bein"], bein2: ["beIN SPORTS 2", "beIN 2", "bein"], prime: ["Prime Video", "Prime Video", "prime"] };
+const TV = { list: [], loaded: false, updated: "" };
+async function loadDiffusions() {
+  try {
+    const r = await fetch("diffusions.json", { cache: "no-cache" });
+    if (r.ok) { const d = await r.json(); TV.list = (d.games || []).map(([iso, a, b, c]) => ({ ts: Date.parse(iso), a, b, pair: [a, b].sort().join("|"), ch: c })).filter(x => x.ts && CH[x.ch]); TV.updated = d.updated || ""; }
+  } catch (e) { /* sans fichier : « à confirmer » partout */ }
+  TV.loaded = true;
+}
+// Programmations ponctuelles antérieures (sans heure) — conservées pour l'historique
 const BROADCASTS = [
-  { date: "2026-10-23", teams: ["NYK","BOS"], channel: "Prime Video", source: "Inside Basket", url: "https://www.insidebasket.com/actu/nba-sur-prime-video-le-programme-complet-de-la-saison-2026-2027-en-france.html" },
-  { date: "2026-10-24", teams: ["HOU","SAS"], channel: "Prime Video", source: "Inside Basket", url: "https://www.insidebasket.com/actu/nba-sur-prime-video-le-programme-complet-de-la-saison-2026-2027-en-france.html" },
-  { date: "2026-10-31", teams: ["NYK","PHI"], channel: "Prime Video", source: "Inside Basket", url: "https://www.insidebasket.com/actu/nba-sur-prime-video-le-programme-complet-de-la-saison-2026-2027-en-france.html" },
-  { date: "2026-10-31", teams: ["LAL","GSW"], channel: "Prime Video", source: "Inside Basket", url: "https://www.insidebasket.com/actu/nba-sur-prime-video-le-programme-complet-de-la-saison-2026-2027-en-france.html" },
-  { date: "2026-11-28", teams: ["MIA","NYK"], channel: "Prime Video", source: "Basket USA", url: "https://www.basketusa.com/news/952020/quels-matchs-nba-seront-diffuses-sur-prime-video-cette-saison/" },
-  { date: "2026-11-28", teams: ["LAL","SAS"], channel: "Prime Video", source: "Basket USA", url: "https://www.basketusa.com/news/952020/quels-matchs-nba-seront-diffuses-sur-prime-video-cette-saison/" },
-  { date: "2026-11-08", teams: ["CHI","PHI"], channel: "Prime Video", source: "Basket USA", url: "https://www.basketusa.com/news/955742/programme-du-soir-sixers-bulls-en-prime-time-lakers-et-celtics-sur-bein-sports/" },
-  { date: "2026-11-09", teams: ["DET","LAL"], channel: "beIN SPORTS 2", source: "Basket USA", url: "https://www.basketusa.com/news/955742/programme-du-soir-sixers-bulls-en-prime-time-lakers-et-celtics-sur-bein-sports/" },
-  { date: "2026-11-09", teams: ["MIL","BOS"], channel: "beIN SPORTS 1", source: "Basket USA", url: "https://www.basketusa.com/news/955742/programme-du-soir-sixers-bulls-en-prime-time-lakers-et-celtics-sur-bein-sports/" },
-  { date: "2026-11-15", teams: ["PHI","IND"], channel: "Prime Video", source: "Basket USA", url: "https://www.basketusa.com/news/957642/programme-du-soir-les-sixers-defient-les-pacers-des-19h00-sur-prime-video/" },
-  { date: "2026-11-15", teams: ["PHX","LAL"], channel: "beIN SPORTS 1", source: "Basket USA", url: "https://www.basketusa.com/news/957642/programme-du-soir-les-sixers-defient-les-pacers-des-19h00-sur-prime-video/" }
+  { date: "2026-10-23", teams: ["NYK","BOS"], channel: "Prime Video" }, { date: "2026-10-24", teams: ["HOU","SAS"], channel: "Prime Video" },
+  { date: "2026-10-31", teams: ["NYK","PHI"], channel: "Prime Video" }, { date: "2026-10-31", teams: ["LAL","GSW"], channel: "Prime Video" },
+  { date: "2026-11-08", teams: ["CHI","PHI"], channel: "Prime Video" }, { date: "2026-11-09", teams: ["DET","LAL"], channel: "beIN SPORTS 2" },
+  { date: "2026-11-09", teams: ["MIL","BOS"], channel: "beIN SPORTS 1" }, { date: "2026-11-15", teams: ["PHI","IND"], channel: "Prime Video" },
+  { date: "2026-11-15", teams: ["PHX","LAL"], channel: "beIN SPORTS 1" }
 ];
 const broadcastFor = g => {
-  const pair = [g.away, g.home].sort().join("|");
-  const localDate = ymd(g.when);
-  return BROADCASTS.find(x => x.date === localDate && x.teams.slice().sort().join("|") === pair) || null;
+  const pair = [g.away, g.home].sort().join("|"), win = g.hasTime ? 4 * 36e5 : 30 * 36e5;
+  const t = TV.list.find(x => x.pair === pair && Math.abs(x.ts - g.ts) < win);
+  if (t) { const c = CH[t.ch]; return { channel: c[0], short: c[1], cls: c[2] }; }
+  const old = BROADCASTS.find(x => x.date === ymd(g.when) && x.teams.slice().sort().join("|") === pair);
+  return old ? { channel: old.channel, short: old.channel.replace("beIN SPORTS", "beIN"), cls: /prime/i.test(old.channel) ? "prime" : "bein" } : null;
 };
-const broadcastMarkup = (g, compact = false) => {
-  const b = broadcastFor(g);
-  return b ? `<a class="broadcast-chip ${/prime/i.test(b.channel) ? "prime" : "bein"}" href="${b.url}" target="_blank" rel="noopener" title="Programmation confirmée · ${esc(b.source)}">${esc(b.channel)}</a>` : `<span class="broadcast-pending">${compact ? "Diffusion à confirmer" : "À confirmer"}</span>`;
-};
+const tvChip = (b, full = true) => `<span class="tv ${b.cls}">${esc(full ? b.channel : b.short)}</span>`;
+const broadcastMarkup = g => { const b = broadcastFor(g); return b ? `<span class="broadcast-chip ${b.cls}">${esc(b.channel)}</span>` : `<span class="broadcast-pending">${g.final ? "—" : "À confirmer"}</span>`; };
 function showBroadcasts() {
   const el = $("#broadcast-tonight"); if (!el) return;
-  const list = state.windowGames.filter(g => !g.final && broadcastFor(g)).sort((a,b) => a.ts-b.ts).slice(0,5);
-  el.innerHTML = list.map(g => `<div class="broadcast-row"><div><b>${esc(g.away)} @ ${esc(g.home)}</b><small>${g.live ? '<span class="live-label">● EN DIRECT</span>' : whenFr(g)}</small></div>${broadcastMarkup(g)}</div>`).join("") || '<div class="empty-state">Aucune diffusion confirmée dans les prochains matchs chargés.</div>';
+  const list = TV.list.filter(x => x.ts > Date.now() - 3 * 36e5).sort((a, b) => a.ts - b.ts).slice(0, 6);
+  el.innerHTML = list.map(x => { const c = CH[x.ch], d = new Date(x.ts); return `<div class="broadcast-row"><div><b>${dot(x.a)} ${esc(x.a)} – ${dot(x.b)} ${esc(x.b)}</b><small>${x.ts < Date.now() ? '<span class="live-label">● EN DIRECT</span>' : fmtDay(d) + " · " + fmtTime(d)}</small></div><span class="broadcast-chip ${c[2]}">${esc(c[0])}</span></div>`; }).join("") || '<div class="empty-state">Aucune diffusion annoncée pour le moment.</div>';
 }
 
-
 const state = { tickerMode: "results", countdown: 300, windowGames: [], teams: null, season: null, noStats: false, nightStats: null, boxCache: new Map(), hlDays: new Map(), modalToken: 0, calLimit: 60, activeTeam: null, playoffToken: 0, gameIndex: new Map(), calMonths: new Map(), calGames: null, calToken: 0, sl: null, statsMode: "night", statsModeSet: false, tops: new Map(), topsLoaded: new Map() };
-
-/* ---------- Styles additionnels (états de chargement, lignes cliquables, détails de séries) ---------- */
-document.head.insertAdjacentHTML("beforeend", `<style>
-.score-row[data-game],.top-item[data-game]{cursor:pointer}.score-row[data-game]:hover,.top-item[data-game]:hover{background:var(--card2)}
-.loading{padding:22px;text-align:center;color:var(--muted);font-size:11px}
-.paywall{padding:14px;border:1px dashed var(--line);border-radius:9px;color:var(--muted);font-size:10px;line-height:1.6;grid-column:1/-1}
-.live-label{color:var(--green)!important;font-weight:800}
-.series-card ul{margin:8px 0 0;padding:0;list-style:none;font-size:9px;color:var(--muted)}
-.series-card li{padding:5px 0;border-top:1px solid var(--line)}
-.series-card summary{cursor:pointer;color:var(--orange);font-size:10px;font-weight:800;margin-top:9px}
-.match-modal{width:min(1080px,calc(100% - 24px));max-height:92vh}
-.box-team{font:800 13px Montserrat,sans-serif;margin:18px 0 8px}
-table.box{margin-bottom:6px}table.box td,table.box th{text-align:center}table.box td:first-child,table.box th:first-child{text-align:left}
-table.box tbody tr:nth-child(even){background:var(--card2)}
-table.box tr.starter-last td{border-bottom:2px solid var(--muted)}
-table.box tfoot td,table.box tr.box-total td{font-weight:800;border-top:2px solid var(--line);background:transparent}
-td.col-pts{font-weight:900;color:var(--orange)}
-/* bandeau : défilement possible jusqu'aux deux extrémités (centré seulement quand tout tient) */
-.ticker-track{min-width:0;justify-content:flex-start!important}
-.ticker-track>:first-child{margin-left:auto}.ticker-track>:last-child{margin-right:auto}
-.ticker-game{flex:0 0 160px}
-tr.starter td:first-child{font-weight:800}
-.table-panel tr.starter-last td{border-bottom:2px solid var(--muted)}
-.seg{display:flex;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:3px}
-.seg button{border:0;background:transparent;color:var(--muted);font-size:11px;font-weight:800;padding:7px 13px;border-radius:6px}
-.seg button.active{background:var(--orange);color:#fff}
-</style>`);
 
 /* ---------- Couche API ---------- */
 class ApiError extends Error { constructor(status) { super("API " + status); this.status = status; } }
@@ -274,18 +259,33 @@ function ensureSeason() {
 }
 
 /* ---------- Bandeau de scores + accueil ---------- */
+function bestScorer(g) {
+  if (!g.final) return null;
+  const rows = (state.nightStats || []).filter(r => r.game && r.game.id === g.id && playedMin(r));
+  if (rows.length) { const r = rows.reduce((a, b) => b.pts > a.pts ? b : a); return { name: shortName(fullName(r.player)), pts: r.pts }; }
+  const l = state.tops.get(norm(g.raw.home_team.full_name) + "|" + norm(g.raw.visitor_team.full_name)) || [];
+  const t = l.find(x => Math.abs(Date.parse(x[0] + "T12:00:00Z") - g.ts) < 20 * 36e5);
+  return t && t[3] ? { name: shortName(t[3]), pts: t[4] } : null;
+}
 function gameCard(g) {
-  const scored = g.final || g.live;
-  return `<button class="ticker-game" data-game="${g.id}"><span class="teams"><b class="${g.final && g.a > g.h ? "winner" : ""}">${esc(g.away)}</b><b class="${g.final && g.h > g.a ? "winner" : ""}">${esc(g.home)}</b></span><span class="score">${scored ? `${g.a}<br>${g.h}` : "—<br>—"}</span><small class="${g.live ? "live-label" : ""}">${g.final ? "Terminé" : g.live ? esc(g.liveLabel) : whenFr(g)}${broadcastFor(g) ? " · " + esc(broadcastFor(g).channel) : ""}</small></button>`;
+  const scored = g.final || g.live, b = broadcastFor(g), recs = hlRecords();
+  const stat = g.final ? '<span class="tc-state final">Final</span>' : g.live ? '<span class="tc-state live">In progress</span>' : `<span class="tc-state up">${esc(whenFr(g))}</span>`;
+  const rec = id => { const r = recs.get(norm(id)); return r ? `${r.w}-${r.l}` : ""; };
+  const row = (ab, sc, lose, full) => `<div class="tc-row${lose ? " lose" : ""}">${dot(ab)}<b>${esc(ab)}</b>${scored ? `<span class="sc">${sc ?? "—"}</span>` : `<span class="rec">${rec(full)}</span>`}</div>`;
+  let foot;
+  if (g.final) { const t = bestScorer(g); foot = t ? `<div class="tc-foot tc-best">★ ${esc(t.name)} : ${t.pts} pts</div>` : '<div class="tc-foot tc-pend">Voir la feuille de match</div>'; }
+  else if (g.live) foot = `<div class="tc-foot tc-live-info">${esc(g.liveLabel)}</div>`;
+  else foot = `<div class="tc-foot">${b ? tvChip(b) : '<span class="tc-pend">Diffusion FR à confirmer</span>'}</div>`;
+  return `<button class="tcard" data-game="${g.id}"><div class="tc-head">${stat}${scored && b ? tvChip(b, false) : ""}</div>${row(g.away, g.a, g.final && g.a < g.h, g.raw.visitor_team.full_name)}${row(g.home, g.h, g.final && g.h < g.a, g.raw.home_team.full_name)}${foot}</button>`;
 }
 function showTicker() {
-  const games = state.tickerMode === "results" ? lastNight() : state.windowGames.filter(g => !g.final).slice(0, 12);
+  const games = state.tickerMode === "results" ? [...state.windowGames.filter(g => g.live), ...lastNight()] : state.windowGames.filter(g => !g.final).slice(0, 14);
   $("#ticker-track").innerHTML = games.map(gameCard).join("") || '<div class="empty-state">Aucune rencontre à afficher.</div>';
   $$(".ticker-tab").forEach(b => b.classList.toggle("active", b.dataset.ticker === state.tickerMode));
 }
 function showScores() {
   const g = lastNight();
-  $("#home-scores").innerHTML = g.map(x => `<div class="score-row" data-game="${x.id}"><span class="score-team">${esc(x.away)}</span><span class="score-center">${x.a} – ${x.h}<small>TERMINÉ</small></span><span class="score-team">${esc(x.home)}</span></div>`).join("") || '<div class="empty-state">Aucun résultat récent.</div>';
+  $("#home-scores").innerHTML = g.map(x => `<div class="score-row" data-game="${x.id}"><span class="score-team">${dot(x.away)} ${esc(x.away)}</span><span class="score-center">${x.a} – ${x.h}<small>FINAL</small></span><span class="score-team">${esc(x.home)} ${dot(x.home)}</span></div>`).join("") || '<div class="empty-state">Aucun résultat récent.</div>';
 }
 const PAY = "Statistiques individuelles momentanément indisponibles (clé Highlightly absente, refusée ou quota du jour atteint).";
 const playedMin = r => r.min && r.min !== "00" && r.min !== "0" && r.min !== "00:00";
@@ -299,7 +299,7 @@ function showFrench() {
   el.innerHTML = fr.map(r => {
     const g = findGame(r.game && r.game.id); let sum = "";
     if (g) { const home = r.team.id === g.homeId, me = home ? g.h : g.a, op = home ? g.a : g.h; sum = `${me > op ? "Victoire" : "Défaite"} ${me}–${op} ${home ? "face à" : "à"} ${esc(home ? g.away : g.home)}`; }
-    return `<article class="player-card"><div class="player-top"><span class="player-avatar">${esc(r.player.first_name[0] + r.player.last_name[0])}</span><b class="player-stat">${r.pts}</b></div><h3>${esc(fullName(r.player))}</h3><p>${esc(r.team.abbreviation)} · ${r.pts} PTS · ${r.reb} REB · ${r.ast} PD</p><small>${sum}</small></article>`;
+    return `<article class="player-card"><div class="player-top"><span class="player-avatar">${esc(r.player.first_name[0] + r.player.last_name[0])}</span><b class="player-stat">${r.pts}</b></div><h3>${esc(fullName(r.player))} ${FLAG}</h3><p>${esc(r.team.abbreviation)} · ${r.pts} PTS · ${r.reb} REB · ${r.ast} PD</p><small>${sum}</small></article>`;
   }).join("") || '<div class="paywall">Aucun joueur français n\'a joué lors de la dernière nuit.</div>';
 }
 function showTop() {
@@ -406,13 +406,14 @@ async function loadTops(m) {
     for (const x of d.tops || []) { const k = norm(x[1]) + "|" + norm(x[2]); const l = state.tops.get(k) || []; if (!l.some(y => y[0] === x[0])) l.push(x); state.tops.set(k, l); }
     state.topsLoaded.set(m, Date.now());
     const sel = $("#calendar-month"); if (sel && sel.value === m) renderCalendar();
+    showTicker();
   } catch (e) { /* le meilleur marqueur reste affiché « — » */ }
 }
 function renderCalendar() {
   const filter = $("#calendar-filter").value; let games = state.calGames || [];
   if (filter === "played") games = games.filter(g => g.final);
   else if (filter === "upcoming") games = games.filter(g => !g.final);
-  const rows = games.map(g => `<tr><td>${whenFr(g)}</td><td class="team-pair">${esc(g.away)} <span class="muted">@</span> ${esc(g.home)}</td><td>${g.final ? `${g.a} – ${g.h}` : g.live ? `${g.a} – ${g.h} <span class="live-label">${esc(g.liveLabel)}</span>` : '<span class="muted">À venir</span>'}</td><td>${topCell(g)}</td><td>${broadcastMarkup(g)}</td><td>${g.final ? `<button class="table-action" data-game="${g.id}">Feuille de match</button>` : "—"}</td></tr>`).join("");
+  const rows = games.map(g => `<tr><td>${whenFr(g)}</td><td class="team-pair">${dot(g.away)}${esc(g.away)} <span class="muted">@</span> ${dot(g.home)}${esc(g.home)}</td><td>${g.final ? `${g.a} – ${g.h}` : g.live ? `${g.a} – ${g.h} <span class="live-label">${esc(g.liveLabel)}</span>` : '<span class="muted">À venir</span>'}</td><td>${topCell(g)}</td><td>${broadcastMarkup(g)}</td><td>${g.final ? `<button class="table-action" data-game="${g.id}">Feuille de match</button>` : "—"}</td></tr>`).join("");
   $("#calendar-body").innerHTML = rows || '<tr><td colspan="6" class="empty-state">Aucun match dans ce filtre pour ce mois.</td></tr>';
 }
 
@@ -425,18 +426,24 @@ async function showTeams() {
   }
   renderTeams();
   hlStandings().then(renderTeams).catch(() => {});
+  loadSeasonLeaders().then(renderTeams).catch(() => {});
 }
 function hlRecords() {
   const m = new Map();
   if (hlStandCache) for (const conf of ["East", "West"]) (hlStandCache.d[conf] || []).forEach((r, i) => m.set(norm(r.t.displayName || ""), { w: r.w, l: r.l, streak: r.streak, rank: i + 1 }));
   return m;
 }
+function frenchByTeam() {
+  const m = new Map(), f = (state.sl && state.sl.d && state.sl.d.french) || [];
+  f.forEach(p => { const k = norm(p.team || ""); if (!m.has(k)) m.set(k, []); m.get(k).push(p.name); });
+  return m;
+}
 function renderTeams() {
   if (!state.teams) return;
-  const q = norm($("#team-search").value), recs = hlRecords();
+  const q = norm($("#team-search").value), recs = hlRecords(), fr = frenchByTeam();
   $("#team-grid").innerHTML = state.teams.filter(t => norm([t.full_name, t.abbreviation, t.city, t.name, CONF[t.conference]].join(" ")).includes(q)).map(t => {
-    const r = recs.get(norm(t.full_name)), k = r && r.rank;
-    return `<article class="team-card" data-team="${t.id}"><div class="team-monogram">${esc(t.abbreviation)}</div><h3>${esc(t.full_name)}</h3><p>Conférence ${CONF[t.conference] || ""}${k ? " · " + (k === 1 ? "1er" : k + "e") : ""}</p><div class="team-record"><span>${r ? `${r.w} V / ${r.l} D` : "— V / — D"}</span><span class="muted">Voir →</span></div></article>`;
+    const r = recs.get(norm(t.full_name)), k = r && r.rank, f = fr.get(norm(t.full_name)) || [];
+    return `<article class="team-card" data-team="${t.id}" style="--tc:${TEAM_COLOR[t.abbreviation] || "#7a8699"}"><div class="tm-top"><div class="team-monogram">${esc(t.abbreviation)}</div><div class="tm-id"><h3>${esc(t.full_name)}</h3><p>Conférence ${CONF[t.conference] || ""}${k ? " · " + (k === 1 ? "1er" : k + "e") : ""}</p></div></div><div class="team-record"><span>${r ? `${r.w} V / ${r.l} D` : "— V / — D"}</span><span class="muted">Voir →</span></div>${f.length ? `<div class="tm-fr">${f.map(n => `<span>${esc(n)} ${FLAG}</span>`).join("")}</div>` : ""}</article>`;
   }).join("") || '<div class="empty-state">Aucune équipe trouvée.</div>';
 }
 const POS = { G: "Arrière", F: "Ailier", C: "Pivot" };
@@ -475,7 +482,7 @@ async function openTeam(id) {
     const isSt = p => starters.has(norm(fullName(p)));
     const players = raw.filter(p => p.first_name || p.last_name).sort((x, y) => (isSt(y) - isSt(x)) || (hasData(y) - hasData(x)) || (rank(x) - rank(y)) || x.last_name.localeCompare(y.last_name));
     const lastSt = players.reduce((acc, p, i) => isSt(p) ? i : acc, -1);
-    const rows = players.map((p, i) => `<tr class="${isSt(p) ? "starter" : ""}${i === lastSt && lastSt < players.length - 1 ? " starter-last" : ""}"><td>${esc(fullName(p))}</td><td>${esc(p.jersey_number || "—")}</td><td>${esc(posFr(p.position))}</td><td>${heightFr(p.height)}</td><td>${esc(p.country || "—")}</td></tr>`).join("");
+    const rows = players.map((p, i) => `<tr class="${isSt(p) ? "starter" : ""}${i === lastSt && lastSt < players.length - 1 ? " starter-last" : ""}"><td>${esc(fullName(p))}${p.country === "France" ? FLAG : ""}</td><td>${esc(p.jersey_number || "—")}</td><td>${esc(posFr(p.position))}</td><td>${heightFr(p.height)}</td><td>${esc(p.country || "—")}</td></tr>`).join("");
     $("#roster").outerHTML = `<div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>Joueur</th><th>N°</th><th>Poste</th><th>Taille</th><th>Pays</th></tr></thead><tbody>${rows}</tbody></table></div></div><p class="section-subtitle">${starters.size ? "Les cinq premiers joueurs sont le cinq majeur du dernier match. " : ""}Moyennes par match (PTS, REB, PDS, INT, CTR) : bientôt disponibles.</p>`;
   } catch (e) { if (state.activeTeam === t.id) $("#roster").textContent = "Effectif indisponible pour le moment."; }
 }
@@ -539,25 +546,39 @@ async function hlStandings() {
   hlStandCache = { t: Date.now(), d: out };
   return out;
 }
-async function showStandings() {
-  const loading = '<tr><td colspan="6" class="loading">Chargement du classement…</td></tr>';
-  if (!hlStandCache && !state.season) { $("#east-body").innerHTML = loading; $("#west-body").innerHTML = loading; }
+/* Données de classement unifiées : Highlightly, avec repli sur le calcul BallDontLie */
+async function standingsData(allowHeavy) {
   let hs = null;
   try { hs = await hlStandings(); } catch (e) { hs = null; }
-  if (!hs) return showStandingsBDL();
   try { await loadTeams(); } catch (e) {}
-  const abbrOf = t => { const b = state.teams && state.teams.find(x => norm(x.full_name) === norm(t.displayName || "")); return b ? b.abbreviation : t.abbreviation; };
-  for (const [conf, id] of [["East", "#east-body"], ["West", "#west-body"]]) {
-    $(id).innerHTML = hs[conf].map((r, i) => `<tr><td>${i + 1}</td><td class="team-pair">${esc(abbrOf(r.t))} <span class="muted">${esc(r.t.name)}</span></td><td>${r.w}</td><td>${r.l}</td><td>${(r.pct * 100).toFixed(1)}%</td><td class="${/V$/.test(r.streak) ? "streak-win" : /D$/.test(r.streak) ? "streak-loss" : ""}">${r.streak}</td></tr>`).join("");
+  const byName = n => state.teams && state.teams.find(x => norm(x.full_name) === norm(n || ""));
+  if (hs) {
+    const out = {};
+    for (const conf of ["East", "West"]) out[conf] = hs[conf].map(r => { const b = byName(r.t.displayName); return { abbr: b ? b.abbreviation : r.t.abbreviation, name: (b && b.name) || r.t.name || r.t.displayName, w: r.w, l: r.l, pct: r.pct, streak: r.streak }; });
+    return out;
   }
+  if (!allowHeavy && !state.season) return null;
+  await ensureSeason();
+  const out = {};
+  for (const conf of ["East", "West"]) out[conf] = standingsFor(state.season.records, conf).map(r => ({ abbr: r.t.abbreviation, name: r.t.name, w: r.w, l: r.l, pct: r.w / Math.max(1, r.w + r.l), streak: r.streak }));
+  return out;
 }
-/* Classement de secours : calculé depuis les résultats BallDontLie */
-async function showStandingsBDL() {
-  const loading = '<tr><td colspan="6" class="loading">Calcul du classement…<span class="season-progress"></span></td></tr>';
-  if (!state.season) { $("#east-body").innerHTML = loading; $("#west-body").innerHTML = loading; }
-  try { await ensureSeason(); } catch (e) { const m = '<tr><td colspan="6" class="empty-state">Classement indisponible pour le moment.</td></tr>'; $("#east-body").innerHTML = m; $("#west-body").innerHTML = m; return; }
+const rkClass = n => n <= 6 ? "g" : n <= 10 ? "o" : "n";
+const pctFr = p => (p * 100).toFixed(1).replace(".", ",") + "%";
+let homeConf = "West";
+async function showHomeStandings() {
+  const el = $("#home-standings"); if (!el) return;
+  let d = null; try { d = await standingsData(false); } catch (e) { d = null; }
+  if (!d) { el.innerHTML = '<div class="empty-state">Classement indisponible pour le moment.</div>'; return; }
+  el.innerHTML = (d[homeConf] || []).map((r, i) => `<div class="st-row${i === 5 || i === 9 ? " cut" : ""}"><span class="rk ${rkClass(i + 1)}">${i + 1}</span><span class="st-team">${dot(r.abbr)}<b>${esc(r.abbr)}</b><em>${esc(r.name)}</em></span><span class="st-rec">${r.w}-${r.l}</span><span class="st-pct">${pctFr(r.pct)}</span></div>`).join("");
+}
+async function showStandings() {
+  const loading = '<tr><td colspan="6" class="loading">Chargement du classement…<span class="season-progress"></span></td></tr>';
+  if (!hlStandCache && !state.season) { $("#east-body").innerHTML = loading; $("#west-body").innerHTML = loading; }
+  let d = null; try { d = await standingsData(true); } catch (e) { d = null; }
+  if (!d) { const m = '<tr><td colspan="6" class="empty-state">Classement indisponible pour le moment.</td></tr>'; $("#east-body").innerHTML = m; $("#west-body").innerHTML = m; return; }
   for (const [conf, id] of [["East", "#east-body"], ["West", "#west-body"]]) {
-    $(id).innerHTML = standingsFor(state.season.records, conf).map((r, i) => `<tr><td>${i + 1}</td><td class="team-pair">${esc(r.t.abbreviation)} <span class="muted">${esc(r.t.name)}</span></td><td>${r.w}</td><td>${r.l}</td><td>${(r.w / Math.max(1, r.w + r.l) * 100).toFixed(1)}%</td><td class="${/V$/.test(r.streak) ? "streak-win" : /D$/.test(r.streak) ? "streak-loss" : ""}">${r.streak}</td></tr>`).join("") || '<tr><td colspan="6" class="empty-state">Aucun match joué pour le moment.</td></tr>';
+    $(id).innerHTML = d[conf].map((r, i) => `<tr class="${i === 5 || i === 9 ? "cut" : ""}"><td class="rk-cell"><span class="rk ${rkClass(i + 1)}">${i + 1}</span></td><td class="team-pair">${dot(r.abbr)}${esc(r.abbr)} <span class="muted">${esc(r.name)}</span></td><td>${r.w}</td><td>${r.l}</td><td>${pctFr(r.pct)}</td><td class="${/V$/.test(r.streak) ? "streak-win" : /D$/.test(r.streak) ? "streak-loss" : ""}">${r.streak}</td></tr>`).join("") || '<tr><td colspan="6" class="empty-state">Aucun match joué pour le moment.</td></tr>';
   }
 }
 
@@ -573,33 +594,48 @@ function buildSeries(games, year) {
     s.games.sort((a, b) => a.ts - b.ts); s.start = s.games[0].ts;
     s.ids = Object.keys(s.wins).map(Number); s.max = Math.max(...s.ids.map(i => s.wins[i]));
     return s;
-  }).filter(s => s.max >= 3).sort((a, b) => a.start - b.start); // écarte les matchs de play-in isolés
-  const last = new Map(), shift = year <= 1983 ? 1 : 0;
+  }).filter(s => s.max >= (year <= 1983 ? 2 : 3)).sort((a, b) => a.start - b.start); // écarte les matchs de play-in isolés
+  const last = new Map();
   list.forEach(s => {
     s.round = Math.min(4, 1 + Math.max(0, ...s.ids.map(i => last.get(i) || 0)));
     s.ids.forEach(i => last.set(i, s.round));
   });
   list.forEach(s => {
-    s.round = Math.min(4, s.round + shift);
-    const needed = (s.round === 1 && year >= 1984 && year <= 2002) ? 3 : 4;
+    const needed = s.round === 1 && year <= 1983 ? 2 : (s.round === 1 && year <= 2002) ? 3 : 4;
     s.ids.sort((a, b) => s.wins[b] - s.wins[a]);
     s.winnerId = s.wins[s.ids[0]] >= needed && s.wins[s.ids[0]] > s.wins[s.ids[1]] ? s.ids[0] : null;
   });
   return list;
 }
 const ROUNDS = ["1er Tour", "Demi-finales de Conférence", "Finales de Conférence", "Finales NBA"];
+const bkTeam = (s, id) => `<div class="bk-t${s.winnerId === id ? " win" : ""}">${dot(s.teams[id].abbreviation)}<span>${esc(s.teams[id].name)}</span><b>${s.wins[id]}</b></div>`;
+function bkNode(s, byRT) {
+  const kids = s.round > 1 ? s.ids.map(id => byRT.get((s.round - 1) + ":" + id)).filter(Boolean) : [];
+  return `<div class="bk-node">${kids.length ? `<div class="bk-kids">${kids.map(k => `<div class="bk-kid">${bkNode(k, byRT)}</div>`).join("")}</div>` : ""}<div class="bk-card">${bkTeam(s, s.ids[0])}${bkTeam(s, s.ids[1])}</div></div>`;
+}
+function bracketTree(series, y) {
+  const fin = series.filter(s => s.round === 4).sort((a, b) => b.start - a.start)[0];
+  if (!fin) return null;
+  const byRT = new Map(); series.forEach(s => s.ids.forEach(id => byRT.set(s.round + ":" + id, s)));
+  const [x, z] = fin.ids; let L = x, R = z;
+  if (fin.teams[z].conference === "West" && fin.teams[x].conference !== "West") { L = z; R = x; }
+  const lr = byRT.get("3:" + L), rr = byRT.get("3:" + R);
+  if (!lr && !rr) return null;
+  const done = fin.winnerId != null, champ = done ? fin.teams[fin.winnerId] : null, mvp = done ? FMVP[y] : null;
+  const confL = CONF[fin.teams[L].conference] || "", confR = CONF[fin.teams[R].conference] || "";
+  return `<div class="bk-titles"><span>Conférence ${confL}</span><span>Conférence ${confR}</span></div><div class="bk-wrap"><div class="bk-side">${lr ? bkNode(lr, byRT) : ""}</div><div class="bk-link"></div><div class="bk-final"><div class="bk-champ">${done ? "Champions NBA " + y : "Finales NBA " + y}</div>${champ ? `<div class="bk-cn">${esc(champ.full_name)}</div>` : ""}<div class="bk-gold"><small>FINALES NBA</small>${bkTeam(fin, fin.ids[0])}${bkTeam(fin, fin.ids[1])}</div>${mvp ? `<div class="bk-mvp">MVP des finales : <span>${esc(mvp)}</span></div>` : ""}</div><div class="bk-link"></div><div class="bk-side rev">${rr ? bkNode(rr, byRT) : ""}</div></div>`;
+}
 async function showPlayoffs() {
   const y = +$("#playoff-year").value, token = ++state.playoffToken;
-  $("#bracket").innerHTML = '<div class="loading" style="grid-column:1/-1">Chargement des playoffs…</div>';
+  $("#bracket").innerHTML = '<div class="loading">Chargement des playoffs…</div>';
   $("#series-detail").innerHTML = "";
-  const intro = $(".bracket-intro p"); if (intro) intro.textContent = "Tableau reconstitué automatiquement à partir des résultats de chaque match (source BallDontLie).";
   let games;
   try { games = (await fetchAll("games", { "seasons[]": y - 1, postseason: "true" }, 6)).map(normGame); }
-  catch (e) { if (token === state.playoffToken) $("#bracket").innerHTML = '<div class="empty-state" style="grid-column:1/-1">Playoffs indisponibles pour le moment.</div>'; return; }
+  catch (e) { if (token === state.playoffToken) $("#bracket").innerHTML = '<div class="empty-state">Playoffs indisponibles pour le moment.</div>'; return; }
   if (token !== state.playoffToken) return;
   const series = buildSeries(games, y);
-  if (!series.length) { $("#bracket").innerHTML = '<div class="empty-state" style="grid-column:1/-1">Aucune série disponible pour cette édition.</div>'; return; }
-  $("#bracket").innerHTML = ROUNDS.map((n, i) => `<div class="bracket-col"><h3>${n}</h3>${series.filter(s => s.round === i + 1).map(s => { const [a, b] = s.ids; return `<div class="bracket-match"><div class="${s.winnerId === a ? "champ" : ""}"><span>${esc(s.teams[a].name)}</span><b>${s.wins[a]}</b></div><div><span>${esc(s.teams[b].name)}</span><b>${s.wins[b]}</b></div></div>`; }).join("") || '<div class="empty-state">—</div>'}</div>`).join("");
+  if (!series.length) { $("#bracket").innerHTML = '<div class="empty-state">Aucune série disponible pour cette édition.</div>'; return; }
+  $("#bracket").innerHTML = bracketTree(series, y) || `<div class="bracket">${ROUNDS.map((n, i) => `<div class="bracket-col"><h3>${n}</h3>${series.filter(s => s.round === i + 1).map(s => { const [a, b] = s.ids; return `<div class="bracket-match"><div class="${s.winnerId === a ? "champ" : ""}"><span>${esc(s.teams[a].name)}</span><b>${s.wins[a]}</b></div><div><span>${esc(s.teams[b].name)}</span><b>${s.wins[b]}</b></div></div>`; }).join("") || '<div class="empty-state">—</div>'}</div>`).join("")}</div>`;
   $("#series-detail").innerHTML = [...series].sort((a, b) => b.round - a.round || a.start - b.start).map(s => {
     const [a, b] = s.ids;
     return `<article class="series-card"><h3>${ROUNDS[s.round - 1]} · ${esc(s.teams[a].full_name)} ${s.wins[a]}–${s.wins[b]} ${esc(s.teams[b].full_name)}</h3><p>${s.winnerId ? esc(s.teams[a].full_name) + " remporte la série " + s.wins[a] + "–" + s.wins[b] : "Série en cours"}</p><details><summary>Voir les matchs</summary><ul>${s.games.map((g, i) => `<li>Match ${i + 1} · ${fmtLong(g.date)} · ${esc(g.away)} ${g.a} – ${g.h} ${esc(g.home)}</li>`).join("")}</ul></details></article>`;
@@ -628,8 +664,11 @@ function setHeadline() {
 async function refreshData() {
   memCache.clear(); state.countdown = 300;
   try {
-    await loadWindow(); showTicker(); showScores();
-    await loadNightStats(); showFrench(); showTop(); showBroadcasts();
+    if (!TV.loaded) await loadDiffusions();
+    await loadWindow(); showTicker(); showScores(); showBroadcasts();
+    standingsData(false).then(() => { showHomeStandings(); showTicker(); }).catch(showHomeStandings);
+    { const ln = lastNight(); loadTops((ln[0] ? ln[0].date : ymd(new Date())).slice(0, 7)); }
+    await loadNightStats(); showTicker(); showFrench(); showTop();
     if ($("#page-stats").classList.contains("active")) showLeaders();
     setNotice(true);
     loadSeasonLeaders(); // fait avancer le calcul des statistiques de saison à chaque visite (réponse ignorée ici)
@@ -649,7 +688,7 @@ function init() {
   initTheme(); setHeadline(); showNews();
   $("#ticker-track").innerHTML = '<div class="empty-state">Chargement des scores…</div>';
   $("#home-scores").innerHTML = '<div class="loading">Chargement des scores…</div>';
-  showFrench(); showTop(); showBroadcasts();
+  showFrench(); showTop();
   $("#year").textContent = new Date().getFullYear();
   for (let y = 2026; y >= 1980; y--) $("#playoff-year").insertAdjacentHTML("beforeend", `<option value="${y}">${y} · Playoffs</option>`);
   $("#bracket").innerHTML = ""; $("#series-detail").innerHTML = "";
@@ -660,8 +699,8 @@ function init() {
   $$(".ticker-tab").forEach(b => b.addEventListener("click", () => { state.tickerMode = b.dataset.ticker; showTicker(); }));
   const openFrom = e => { const b = e.target.closest("[data-game]"); if (b && b.dataset.game) openGame(+b.dataset.game); };
   ["#ticker-track", "#home-scores", "#top-performances"].forEach(s => $(s).addEventListener("click", openFrom));
-  $("#ticker-prev").onclick = () => $("#ticker-track").scrollBy({ left: -250, behavior: "smooth" });
-  $("#ticker-next").onclick = () => $("#ticker-track").scrollBy({ left: 250, behavior: "smooth" });
+  $("#ticker-prev").onclick = () => $("#ticker-track").scrollBy({ left: -480, behavior: "smooth" });
+  $("#ticker-next").onclick = () => $("#ticker-track").scrollBy({ left: 480, behavior: "smooth" });
   $("#refresh-btn").onclick = () => { $("#refresh-label").textContent = "Actualisation…"; refreshData(); };
   $("#calendar-filter").onchange = () => { if (state.calGames) renderCalendar(); };
   $("#calendar-body").addEventListener("click", e => { if (e.target.closest("[data-more]")) { state.calLimit += 60; renderCalendar(); return; } openFrom(e); });
@@ -669,6 +708,7 @@ function init() {
   $("#team-grid").addEventListener("click", e => { const c = e.target.closest("[data-team]"); if (c) openTeam(c.dataset.team); });
   $("#team-detail").addEventListener("click", e => { if (e.target.id === "team-back") { $("#team-grid").hidden = false; $("#team-detail").hidden = true; state.activeTeam = null; } });
   $("#playoff-year").onchange = showPlayoffs;
+  $("#home-conf").addEventListener("click", e => { const b = e.target.closest("button[data-conf]"); if (!b) return; homeConf = b.dataset.conf; $$("#home-conf button").forEach(x => x.classList.toggle("active", x === b)); showHomeStandings(); });
   $("#theme-toggle").onclick = () => { document.body.dataset.theme = document.body.dataset.theme === "dark" ? "light" : "dark"; localStorage.setItem("ltb-theme", document.body.dataset.theme); updateThemeButton(); };
   $("#mobile-menu").onclick = () => $(".main-nav").classList.toggle("open");
   $("#modal-close").onclick = () => $("#match-modal").close();

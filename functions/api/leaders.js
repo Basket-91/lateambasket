@@ -10,6 +10,8 @@ const MIN_RATIO = 0.5;             // un joueur apparaît s'il a joué au moins 
 
 const STAT = { min: "Total Minutes Played", pts: "Total Points Scored", reb: "Total Rebounds", ast: "Total Assists", stl: "Total Steals", blk: "Total Blocks" };
 const j = (o, status = 200, cc = "no-store") => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json", "Cache-Control": cc } });
+const FRENCH = ["victor wembanyama","zaccharie risacher","alex sarr","rudy gobert","bilal coulibaly","guerschon yabusele","nicolas batum","ousmane dieng","tidjane salaun","pacome dadiet","noa essengue","joan beringer","hugo besson","mohamed diawara","rayan rupert","killian hayes","theo maledon","sidy cissoko","moussa diabate","vincent poirier","frank ntilikina","evan fournier"];
+const normName = s => String(s).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 const hlSeason = () => { const d = new Date(); return d.getUTCMonth() >= 9 ? d.getUTCFullYear() + 1 : d.getUTCFullYear(); };
 
 async function hl(env, p, params = {}) {
@@ -65,7 +67,8 @@ export async function onRequestGet({ env, waitUntil }) {
   for (const k of ["pts", "ast", "reb", "blk", "stl"]) {
     leaders[k] = ps.filter(p => p.g >= minG).map(p => ({ name: p.n, team: p.t, g: p.g, v: Math.round(p[k] / p.g * 10) / 10 })).sort((a, b) => b.v - a.v).slice(0, 5);
   }
-  const res = j({ season, status: "ok", gamesCounted: Object.keys(st.done).length, gamesTotal: st.total, minGames: minG, budgetUsed: st.budget.used, budgetMax: DAILY_BUDGET, leaders }, 200, "public, max-age=60");
+  const french = ps.filter(p => FRENCH.includes(normName(p.n))).map(p => ({ name: p.n, team: p.t, g: p.g }));
+  const res = j({ season, status: "ok", gamesCounted: Object.keys(st.done).length, gamesTotal: st.total, minGames: minG, budgetUsed: st.budget.used, budgetMax: DAILY_BUDGET, leaders, french }, 200, "public, max-age=60");
 
   // 2. Mise à jour en arrière-plan (le visiteur n'attend jamais les appels à Highlightly)
   const listStale = Date.now() - st.listedAt > (st.pending.length ? 12 * 36e5 : LIST_EVERY);
