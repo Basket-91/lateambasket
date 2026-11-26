@@ -29,9 +29,19 @@ async function boxRaw(env, kv, id) {
 }
 const pstat = (p, name) => { const s = (p.statistics || []).find(x => x.name === name); return s ? Number(s.value) || 0 : 0; };
 
+// Remet en attente les matchs abandonnés (feuille vide ou incohérente) pour une nouvelle tentative
+function revive(st) {
+  for (const [id, t] of Object.entries(st.tops || {})) if (t && !t[3]) { delete st.done[id]; delete st.tops[id]; }
+  st.listedAt = 0;
+}
 // m = [id, date, homeId, homeName, awayId, awayName, échecs, topsOnly]
 function addBox(st, raw, m) {
   if (!Array.isArray(raw) || raw.length !== 2 || !raw.every(t => t.boxScores && t.boxScores.length)) return false;
+  if (m[8] != null && m[9] != null) { // contrôle : la somme des points des joueurs doit égaler le score final de chaque équipe
+    const tot = t => (t.boxScores || []).reduce((a, p) => a + pstat(p, STAT.pts), 0);
+    const h = raw.find(t => t.team && t.team.id === m[2]), v = raw.find(t => t.team && t.team.id === m[4]);
+    if (h && v && (tot(h) !== m[8] || tot(v) !== m[9])) return false;
+  }
   let played = 0, best = null;
   for (const t of raw) {
     const name = t.team && t.team.id === m[2] ? m[3] : t.team && t.team.id === m[4] ? m[5] : (t.team && t.team.name) || "";
@@ -52,13 +62,13 @@ function addBox(st, raw, m) {
   return played > 0;
 }
 
-export async function onRequestGet({ env, waitUntil }) {
+export async function onRequestGet({ request, env, waitUntil }) {
   const kv = env.STATS;
   if (!kv) return j({ error: "kv_missing" }, 501);
   const season = hlSeason(), key = "season:" + season;
   const st = (await kv.get(key, "json")) || { season, done: {}, pending: [], players: {}, tops: {}, listedAt: 0, total: 0, budget: { day: "", used: 0 } };
   if (!st.tops) { st.tops = {}; st.listedAt = 0; } // ancienne version : on relistera pour retrouver les meilleurs marqueurs
-  if (st.v !== 2) { // migration : un même joueur pouvait avoir plusieurs identifiants -> on regroupe par nom (somme exacte)
+  if (!st.v || st.v < 2) { // migration : un même joueur pouvait avoir plusieurs identifiants -> on regroupe par nom (somme exacte)
     const by = {};
     for (const p of Object.values(st.players)) {
       const k = normName(p.n), r = by[k];
@@ -66,10 +76,24 @@ export async function onRequestGet({ env, waitUntil }) {
       r.g += p.g; for (const f of ["pts", "reb", "ast", "stl", "blk"]) r[f] += p[f];
       if (p.d >= r.d) { r.d = p.d; r.t = p.t; }
     }
-    st.players = by; st.v = 2; waitUntil(kv.put(key, JSON.stringify(st)));
+    st.players = by; st.v = 2;
   }
+  if (st.v < 3) { revive(st); st.v = 3; waitUntil(kv.put(key, JSON.stringify(st))); }
   const today = new Date().toISOString().slice(0, 10);
   if (st.budget.day !== today) st.budget = { day: today, used: 0 };
+
+  const dbg = new URL(request.url).searchParams.get("debug");
+  if (dbg && env.HIGHLIGHTLY_KEY) { // diagnostic : matchs comptés pour un joueur (ex. /api/leaders?debug=doncic), à comparer avec nba.com
+    const q = normName(dbg), lines = []; let calls = 0;
+    const ids = Object.entries(st.tops).filter(([id]) => st.done[id]).sort((a, b) => (a[1][0] < b[1][0] ? -1 : 1));
+    for (const [id, t] of ids) {
+      let raw; try { const c = await kv.get("hl:box-score/" + id); if (c) raw = JSON.parse(c); else if (calls < 30) { calls++; raw = await hl(env, "box-score/" + id); } } catch (e) { continue; }
+      if (!Array.isArray(raw)) continue;
+      for (const tm of raw) for (const p of tm.boxScores || []) if (p.player && normName(p.player.name).includes(q)) lines.push({ match: id, date: t[0], home: t[1], away: t[2], min: pstat(p, STAT.min), pts: pstat(p, STAT.pts), teamTotal: (tm.boxScores || []).reduce((a, x) => a + pstat(x, STAT.pts), 0) });
+    }
+    const played = lines.filter(l => l.min > 0);
+    return j({ query: dbg, requests: calls, gamesListed: lines.length, gamesPlayed: played.length, totalPts: played.reduce((a, l) => a + l.pts, 0), avg: played.length ? Math.round(played.reduce((a, l) => a + l.pts, 0) / played.length * 10) / 10 : null, stored: st.players[q] || Object.entries(st.players).filter(([k]) => k.includes(q)).map(([, v]) => v), lines });
+  }
 
   // 1. Réponse immédiate à partir de ce qui est déjà stocké (lecture KV uniquement : rapide pour tous les visiteurs)
   const ps = Object.values(st.players);
@@ -80,8 +104,9 @@ export async function onRequestGet({ env, waitUntil }) {
     leaders[k] = ps.filter(p => p.g >= minG).map(p => ({ name: p.n, team: p.t, g: p.g, v: Math.round(p[k] / p.g * 10) / 10 })).sort((a, b) => b.v - a.v).slice(0, 5);
   }
   const french = ps.filter(p => FRENCH.includes(normName(p.n))).map(p => ({ name: p.n, team: p.t, g: p.g }));
+  const abandoned = Object.values(st.tops || {}).filter(t => t && !t[3]).length;
   const through = ps.reduce((a, p) => (p.d > a ? p.d : a), "");
-  const res = j({ season, status: "ok", gamesCounted: Object.keys(st.done).length, gamesTotal: st.total, minGames: minG, budgetUsed: st.budget.used, budgetMax: DAILY_BUDGET, leaders, french, through }, 200, "public, max-age=60");
+  const res = j({ season, status: "ok", gamesCounted: Object.keys(st.done).length, gamesTotal: st.total, minGames: minG, budgetUsed: st.budget.used, budgetMax: DAILY_BUDGET, leaders, french, through, abandoned }, 200, "public, max-age=60");
 
   // 2. Mise à jour en arrière-plan (le visiteur n'attend jamais les appels à Highlightly)
   const listStale = Date.now() - st.listedAt > LIST_EVERY, recentDue = Date.now() - (st.recentAt || 0) > RECENT_EVERY;
@@ -93,9 +118,11 @@ export async function onRequestGet({ env, waitUntil }) {
   return res;
 }
 
+const sumArr = a => Array.isArray(a) && a.length ? a.reduce((x, y) => x + (Number(y) || 0), 0) : null;
+const expected = m => { const sc = (m.state && m.state.score) || {}, h = sumArr(sc.homeTeam), a = sumArr(sc.awayTeam); return h != null && a != null && h > 0 && a > 0 ? [h, a] : []; };
 const pushPending = (st, seen, m) => {
   if (seen.has(m.id)) return;
-  const row = [m.id, String(m.date).slice(0, 10), m.homeTeam.id, m.homeTeam.displayName, m.awayTeam.id, m.awayTeam.displayName, 0, 0];
+  const row = [m.id, String(m.date).slice(0, 10), m.homeTeam.id, m.homeTeam.displayName, m.awayTeam.id, m.awayTeam.displayName, 0, 0, ...expected(m)];
   if (!st.done[m.id]) { st.pending.push(row); seen.add(m.id); }
   else if (!st.tops[m.id]) { row[7] = 1; st.pending.push(row); seen.add(m.id); }
 };
@@ -129,6 +156,7 @@ async function update(env, kv, key, season, st, listStale, recentDue) {
     if (recentDue && env.BALLDONTLIE_KEY) { st.recentAt = Date.now(); changed = true; try { await recent(env, st); } catch (e) { /* on retentera */ } }
     // liste des matchs terminés de la saison
     if (listStale) {
+      revive(st);
       const seen = new Set(st.pending.map(x => x[0]));
       let off = 0, finished = 0;
       for (let page = 0; page < 6 && st.budget.used < DAILY_BUDGET; page++) {

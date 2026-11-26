@@ -514,7 +514,7 @@ async function showLeaders() {
   if (tg) { $$("button", tg).forEach(b => b.classList.toggle("active", b.dataset.mode === state.statsMode)); tg.hidden = !seasonOk; }
   if (state.statsMode === "season") {
     const abbrOf = n => { const t = state.teams && state.teams.find(x => norm(x.full_name) === norm(n || "")); return t ? t.abbreviation : (n || ""); };
-    if (sub) sub.textContent = `Moyennes par match · saison ${sl.season - 1}-${String(sl.season).slice(2)} · minimum ${sl.minGames} matchs joués` + (sl.through ? ` · à jour jusqu'au ${fmtLong(sl.through)}` : "") + (sl.gamesCounted < sl.gamesTotal ? ` · calcul en cours (${sl.gamesCounted} matchs sur ${sl.gamesTotal})` : "");
+    if (sub) sub.textContent = `Moyennes par match · saison ${sl.season - 1}-${String(sl.season).slice(2)} · minimum ${sl.minGames} matchs joués` + (sl.through ? ` · à jour jusqu'au ${fmtLong(sl.through)}` : "") + (sl.abandoned ? ` · ${sl.abandoned} match(s) en attente d'une feuille complète` : "") + (sl.gamesCounted < sl.gamesTotal ? ` · calcul en cours (${sl.gamesCounted} matchs sur ${sl.gamesTotal})` : "");
     el.innerHTML = LEAD_CATS.map(([name, abbr, k]) => `<article class="leader-card"><h2>${name} <span class="muted">(${abbr})</span></h2>${(sl.leaders[k] || []).map((r, i) => `<div class="leader-row"><span class="muted">${i + 1}</span><span>${esc(r.name)} <span class="muted">${esc(abbrOf(r.team))}</span></span><b>${r.v.toFixed(1)}</b></div>`).join("")}</article>`).join("");
     return;
   }
