@@ -85,12 +85,11 @@ export async function onRequestGet({ request, env, waitUntil }) {
   const dbg = new URL(request.url).searchParams.get("debug");
   if (dbg && env.HIGHLIGHTLY_KEY) { // diagnostic : matchs comptés pour un joueur (ex. /api/leaders?debug=doncic), à comparer avec nba.com
     const q = normName(dbg), lines = []; let calls = 0;
-    const rec0 = Object.entries(st.players).find(([k]) => k.includes(q)), team0 = rec0 ? rec0[1].t : "";
-    const ids = Object.entries(st.tops).filter(([id, t]) => st.done[id] && (!team0 || t[1] === team0 || t[2] === team0)).sort((a, b) => (a[1][0] < b[1][0] ? -1 : 1)); // seulement les matchs de son équipe
+    const ids = Object.entries(st.tops).filter(([id]) => st.done[id]).sort((a, b) => (a[1][0] < b[1][0] ? -1 : 1));
     for (const [id, t] of ids) {
       let raw; try { const c = await kv.get("hl:box-score/" + id); if (c) raw = JSON.parse(c); else if (calls < 30) { calls++; raw = await hl(env, "box-score/" + id); } } catch (e) { continue; }
       if (!Array.isArray(raw)) continue;
-      for (const tm of raw) for (const p of tm.boxScores || []) if (p.player && normName(p.player.name).includes(q)) lines.push({ match: id, hlDate: t[0], date: t[0], home: t[1], away: t[2], min: pstat(p, STAT.min), pts: pstat(p, STAT.pts), teamTotal: (tm.boxScores || []).reduce((a, x) => a + pstat(x, STAT.pts), 0) });
+      for (const tm of raw) for (const p of tm.boxScores || []) if (p.player && normName(p.player.name).includes(q)) lines.push({ match: id, date: t[0], home: t[1], away: t[2], min: pstat(p, STAT.min), pts: pstat(p, STAT.pts), teamTotal: (tm.boxScores || []).reduce((a, x) => a + pstat(x, STAT.pts), 0) });
     }
     const played = lines.filter(l => l.min > 0);
     return j({ query: dbg, requests: calls, gamesListed: lines.length, gamesPlayed: played.length, totalPts: played.reduce((a, l) => a + l.pts, 0), avg: played.length ? Math.round(played.reduce((a, l) => a + l.pts, 0) / played.length * 10) / 10 : null, stored: st.players[q] || Object.entries(st.players).filter(([k]) => k.includes(q)).map(([, v]) => v), lines });
