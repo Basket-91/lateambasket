@@ -36,6 +36,7 @@ function revive(st) {
 }
 // m = [id, date, homeId, homeName, awayId, awayName, échecs, topsOnly]
 function addBox(st, raw, m) {
+  const sign = m[10] === -1 ? -1 : 1; // -1 : on retire un match (présaison comptée par erreur)
   if (!Array.isArray(raw) || raw.length !== 2 || !raw.every(t => t.boxScores && t.boxScores.length)) return false;
   if (m[8] != null && m[9] != null) { // contrôle : la somme des points des joueurs doit égaler le score final de chaque équipe
     const tot = t => (t.boxScores || []).reduce((a, p) => a + pstat(p, STAT.pts), 0);
@@ -49,6 +50,11 @@ function addBox(st, raw, m) {
       if (!p.player || pstat(p, STAT.min) <= 0) continue;
       played++;
       const pts = pstat(p, STAT.pts);
+      if (sign < 0) {
+        const pk0 = normName(p.player.name || p.player.id), r0 = st.players[pk0];
+        if (r0) { r0.g--; for (const k of ["pts", "reb", "ast", "stl", "blk"]) r0[k] -= pstat(p, STAT[k]); if (r0.g <= 0) delete st.players[pk0]; }
+        continue;
+      }
       if (!best || pts > best.pts) best = { name: p.player.name || "", pts, team: name };
       if (m[7]) continue; // feuille déjà comptée dans les moyennes : on ne recalcule que le meilleur marqueur
       const pk = normName(p.player.name || p.player.id);
@@ -58,7 +64,7 @@ function addBox(st, raw, m) {
       if (m[1] >= rec.d) { rec.d = m[1]; rec.t = name; }
     }
   }
-  if (best) st.tops[m[0]] = [m[1], m[3], m[5], best.name, best.pts, best.team];
+  if (best && sign > 0) st.tops[m[0]] = [m[1], m[3], m[5], best.name, best.pts, best.team];
   return played > 0;
 }
 
@@ -79,6 +85,7 @@ export async function onRequestGet({ request, env, waitUntil }) {
     st.players = by; st.v = 2;
   }
   if (st.v < 3) { revive(st); st.v = 3; waitUntil(kv.put(key, JSON.stringify(st))); }
+  if (st.v < 4) { st.cleaned = 0; st.v = 4; waitUntil(kv.put(key, JSON.stringify(st))); }
   const today = new Date().toISOString().slice(0, 10);
   if (st.budget.day !== today) st.budget = { day: today, used: 0 };
 
@@ -105,13 +112,14 @@ export async function onRequestGet({ request, env, waitUntil }) {
     leaders[k] = ps.filter(p => p.g >= minG).map(p => ({ name: p.n, team: p.t, g: p.g, v: Math.round(p[k] / p.g * 10) / 10 })).sort((a, b) => b.v - a.v).slice(0, 5);
   }
   const french = ps.filter(p => FRENCH.includes(normName(p.n))).map(p => ({ name: p.n, team: p.t, g: p.g }));
+  const cleanup = st.pending.filter(x => x[10] === -1).length;
   const abandoned = Object.values(st.tops || {}).filter(t => t && !t[3]).length;
   const through = ps.reduce((a, p) => (p.d > a ? p.d : a), "");
-  const res = j({ season, status: "ok", gamesCounted: Object.keys(st.done).length, gamesTotal: st.total, minGames: minG, budgetUsed: st.budget.used, budgetMax: DAILY_BUDGET, leaders, french, through, abandoned }, 200, "public, max-age=60");
+  const res = j({ season, status: "ok", gamesCounted: Object.keys(st.done).length, gamesTotal: st.total, minGames: minG, budgetUsed: st.budget.used, budgetMax: DAILY_BUDGET, leaders, french, through, abandoned, cleanup }, 200, "public, max-age=60");
 
   // 2. Mise à jour en arrière-plan (le visiteur n'attend jamais les appels à Highlightly)
   const listStale = Date.now() - st.listedAt > LIST_EVERY, recentDue = Date.now() - (st.recentAt || 0) > RECENT_EVERY;
-  const needsWork = env.HIGHLIGHTLY_KEY && st.budget.used < DAILY_BUDGET && (listStale || recentDue || st.pending.length > 0);
+  const needsWork = env.HIGHLIGHTLY_KEY && st.budget.used < DAILY_BUDGET && (listStale || recentDue || st.pending.length > 0 || !st.cleaned);
   if (needsWork && !(await kv.get("lock:" + season))) {
     await kv.put("lock:" + season, "1", { expirationTtl: 60 });
     waitUntil(update(env, kv, key, season, st, listStale, recentDue));
@@ -122,8 +130,9 @@ export async function onRequestGet({ request, env, waitUntil }) {
 const sumArr = a => Array.isArray(a) && a.length ? a.reduce((x, y) => x + (Number(y) || 0), 0) : null;
 const expected = m => { const sc = (m.state && m.state.score) || {}, h = sumArr(sc.homeTeam), a = sumArr(sc.awayTeam); return h != null && a != null && h > 0 && a > 0 ? [h, a] : []; };
 const pushPending = (st, seen, m) => {
-  if (seen.has(m.id)) return;
+  if (seen.has(m.id) || (st.start && String(m.date).slice(0, 10) < st.start)) return; // présaison ignorée
   const row = [m.id, String(m.date).slice(0, 10), m.homeTeam.id, m.homeTeam.displayName, m.awayTeam.id, m.awayTeam.displayName, 0, 0, ...expected(m)];
+  if (row.length < 10) row.push(null, null);
   if (!st.done[m.id]) { st.pending.push(row); seen.add(m.id); }
   else if (!st.tops[m.id]) { row[7] = 1; st.pending.push(row); seen.add(m.id); }
 };
@@ -154,6 +163,21 @@ async function recent(env, st) {
 async function update(env, kv, key, season, st, listStale, recentDue) {
   let changed = false;
   try {
+    if (!st.start && env.BALLDONTLIE_KEY) { // date du premier match de saison régulière (via BallDontLie) : tout ce qui est avant est de la présaison
+      try {
+        const y = season - 1, u = new URL("https://api.balldontlie.io/v1/games");
+        u.searchParams.set("seasons[]", y); u.searchParams.set("start_date", y + "-10-01"); u.searchParams.set("end_date", y + "-11-10"); u.searchParams.set("per_page", "100");
+        const r = await fetch(u, { headers: { Authorization: env.BALLDONTLIE_KEY } });
+        const ds = r.ok ? ((await r.json()).data || []).map(g => String(g.date).slice(0, 10)).sort() : [];
+        if (ds.length) { st.start = ds[0]; changed = true; }
+      } catch (e) { /* on retentera */ }
+    }
+    if (st.start && !st.cleaned) { // retire des moyennes les matchs de présaison déjà comptés
+      const queued = new Set(st.pending.map(x => x[0]));
+      st.pending = st.pending.filter(x => !(x[1] < st.start && x[10] !== -1));
+      for (const [id, t] of Object.entries(st.tops || {})) if (st.done[id] && t[0] < st.start && !queued.has(+id) && !queued.has(id)) st.pending.push([+id, t[0], 0, t[1], 0, t[2], 0, 0, null, null, -1]);
+      st.cleaned = 1; changed = true;
+    }
     if (recentDue && env.BALLDONTLIE_KEY) { st.recentAt = Date.now(); changed = true; try { await recent(env, st); } catch (e) { /* on retentera */ } }
     // liste des matchs terminés de la saison
     if (listStale) {
@@ -172,11 +196,11 @@ async function update(env, kv, key, season, st, listStale, recentDue) {
         if (list.length < 100) break;
         off += 100;
       }
-      st.total = Object.keys(st.done).length + st.pending.filter(m => !m[7]).length;
+      st.total = Object.keys(st.done).length + st.pending.filter(m => !m[7] && m[10] !== -1).length;
       st.listedAt = Date.now(); changed = true;
     }
     // feuilles de match à traiter (les plus récentes d'abord : le calendrier du mois en cours se remplit en premier)
-    st.pending.sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0));
+    st.pending.sort((a, b) => ((b[10] === -1) - (a[10] === -1)) || (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0));
     const batch = st.pending.slice(0, Math.max(0, Math.min(BATCH, DAILY_BUDGET - st.budget.used)));
     const doneNow = new Set();
     let stop = false;
@@ -186,10 +210,11 @@ async function update(env, kv, key, season, st, listStale, recentDue) {
       st.budget.used += res.filter(r => r.status === "rejected" || r.value.fetched).length;
       res.forEach((r, idx) => {
         const m = chunk[idx];
-        if (r.status === "fulfilled" && addBox(st, r.value.raw, m)) { st.done[m[0]] = 1; doneNow.add(m[0]); return; }
+        if (r.status === "fulfilled" && addBox(st, r.value.raw, m)) { if (m[10] === -1) { delete st.done[m[0]]; delete st.tops[m[0]]; } else st.done[m[0]] = 1; doneNow.add(m[0]); return; }
         if (r.status === "rejected" && [401, 403, 429].includes(r.reason && r.reason.status)) { stop = true; return; }
         m[6] = (m[6] || 0) + 1;
-        if (m[6] >= 6) { st.done[m[0]] = 1; st.tops[m[0]] = [m[1], m[3], m[5], "", 0, ""]; doneNow.add(m[0]); } // feuille toujours vide : on l'abandonne
+        if (m[6] >= 6 && m[10] === -1) doneNow.add(m[0]);
+        else if (m[6] >= 6) { st.done[m[0]] = 1; st.tops[m[0]] = [m[1], m[3], m[5], "", 0, ""]; doneNow.add(m[0]); } // feuille toujours vide : on l'abandonne
       });
     }
     if (batch.length) { st.pending = st.pending.filter(m => !doneNow.has(m[0])); changed = true; }
