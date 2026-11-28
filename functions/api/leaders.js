@@ -9,6 +9,8 @@ const LIST_EVERY = 24 * 36e5;      // relistage complet de la saison (auto-répa
 const RECENT_EVERY = 10 * 60 * 1000; // détection des matchs qui viennent de se terminer (via BallDontLie, gratuit)
 const MIN_RATIO = 0.7;             // comme sur nba.com : un joueur est classé s'il a joué au moins 70 % des matchs
 
+// Premier jour de la saison régulière (date ET). Tout match antérieur est de la présaison et n'entre pas dans les moyennes (nba.com l'exclut aussi).
+const SEASON_START = { 2027: "2026-10-20" };
 const STAT = { min: "Total Minutes Played", pts: "Total Points Scored", reb: "Total Rebounds", ast: "Total Assists", stl: "Total Steals", blk: "Total Blocks" };
 const j = (o, status = 200, cc = "no-store") => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json", "Cache-Control": cc } });
 const FRENCH = ["victor wembanyama","zaccharie risacher","alex sarr","rudy gobert","bilal coulibaly","guerschon yabusele","nicolas batum","ousmane dieng","tidjane salaun","pacome dadiet","noa essengue","joan beringer","hugo besson","mohamed diawara","rayan rupert","killian hayes","theo maledon","sidy cissoko","moussa diabate","vincent poirier","frank ntilikina","evan fournier"];
@@ -115,7 +117,7 @@ export async function onRequestGet({ request, env, waitUntil }) {
   const cleanup = st.pending.filter(x => x[10] === -1).length;
   const abandoned = Object.values(st.tops || {}).filter(t => t && !t[3]).length;
   const through = ps.reduce((a, p) => (p.d > a ? p.d : a), "");
-  const res = j({ season, status: "ok", gamesCounted: Object.keys(st.done).length, gamesTotal: st.total, minGames: minG, budgetUsed: st.budget.used, budgetMax: DAILY_BUDGET, leaders, french, through, abandoned, cleanup }, 200, "public, max-age=60");
+  const res = j({ season, status: "ok", gamesCounted: Object.keys(st.done).length, gamesTotal: st.total, minGames: minG, budgetUsed: st.budget.used, budgetMax: DAILY_BUDGET, leaders, french, through, abandoned, cleanup, start: st.start || null }, 200, "public, max-age=60");
 
   // 2. Mise à jour en arrière-plan (le visiteur n'attend jamais les appels à Highlightly)
   const listStale = Date.now() - st.listedAt > LIST_EVERY, recentDue = Date.now() - (st.recentAt || 0) > RECENT_EVERY;
@@ -163,6 +165,8 @@ async function recent(env, st) {
 async function update(env, kv, key, season, st, listStale, recentDue) {
   let changed = false;
   try {
+    const FB = SEASON_START[season];
+    if (FB && (!st.start || st.start < FB)) { st.start = FB; st.cleaned = 0; changed = true; }
     if (!st.start && env.BALLDONTLIE_KEY) { // date du premier match de saison régulière (via BallDontLie) : tout ce qui est avant est de la présaison
       try {
         const y = season - 1, u = new URL("https://api.balldontlie.io/v1/games");
