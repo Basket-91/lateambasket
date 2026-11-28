@@ -27,7 +27,10 @@ async function hl(env, p, params = {}) {
 // Réutilise une feuille déjà figée en KV par le site (aucune requête consommée), sinon l'API
 async function boxRaw(env, kv, id) {
   try { const c = await kv.get("hl:box-score/" + id); if (c) return { raw: JSON.parse(c), fetched: false }; } catch (e) {}
-  return { raw: await hl(env, "box-score/" + id), fetched: true };
+  const raw = await hl(env, "box-score/" + id);
+  // On conserve les feuilles complètes (clé partagée avec le relais /api/hl) : plus jamais redemandées à Highlightly
+  if (Array.isArray(raw) && raw.length === 2 && raw.every(t => t.boxScores && t.boxScores.length)) { try { await kv.put("hl:box-score/" + id, JSON.stringify(raw), { expirationTtl: 60 * 60 * 24 * 365 }); } catch (e) {} }
+  return { raw, fetched: true };
 }
 const pstat = (p, name) => { const s = (p.statistics || []).find(x => x.name === name); return s ? Number(s.value) || 0 : 0; };
 
@@ -97,7 +100,7 @@ export async function onRequestGet({ request, env, waitUntil }) {
     const rec0 = Object.entries(st.players).find(([k]) => k.includes(q)), team0 = rec0 ? rec0[1].t : "";
     const ids = Object.entries(st.tops).filter(([id, t]) => st.done[id] && (!team0 || t[1] === team0 || t[2] === team0)).sort((a, b) => (a[1][0] < b[1][0] ? -1 : 1)); // seulement les matchs de son équipe
     for (const [id, t] of ids) {
-      let raw; try { const c = await kv.get("hl:box-score/" + id); if (c) raw = JSON.parse(c); else if (calls < 30) { calls++; raw = await hl(env, "box-score/" + id); } } catch (e) { continue; }
+      let raw; try { const c = await kv.get("hl:box-score/" + id); if (c) raw = JSON.parse(c); else if (calls < 30) { calls++; raw = (await boxRaw(env, kv, id)).raw; } } catch (e) { continue; }
       if (!Array.isArray(raw)) continue;
       for (const tm of raw) for (const p of tm.boxScores || []) if (p.player && normName(p.player.name).includes(q)) lines.push({ match: id, hlDate: t[0], date: t[0], home: t[1], away: t[2], min: pstat(p, STAT.min), pts: pstat(p, STAT.pts), teamTotal: (tm.boxScores || []).reduce((a, x) => a + pstat(x, STAT.pts), 0) });
     }
