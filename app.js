@@ -6,7 +6,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const norm = s => String(s).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-const FRENCH = ["Victor Wembanyama", "Zaccharie Risacher", "Alex Sarr", "Rudy Gobert", "Bilal Coulibaly", "Guerschon Yabusele", "Nicolas Batum", "Ousmane Dieng", "Tidjane Salaun", "Pacome Dadiet", "Noa Essengue", "Joan Beringer"].map(norm);
+const FRENCH = ["Victor Wembanyama", "Zaccharie Risacher", "Alex Sarr", "Rudy Gobert", "Bilal Coulibaly", "Guerschon Yabusele", "Nicolas Batum", "Ousmane Dieng", "Tidjane Salaun", "Pacome Dadiet", "Noa Essengue", "Joan Beringer", "Hugo Besson", "Mohamed Diawara", "Rayan Rupert", "Killian Hayes", "Theo Maledon", "Sidy Cissoko", "Moussa Diabate", "Vincent Poirier", "Frank Ntilikina", "Evan Fournier"].map(norm);
 const CONF = { East: "Est", West: "Ouest" };
 const news = [["ANALYSE", "Les nouvelles tendances tactiques à suivre cette saison", "Décryptage des ajustements qui changent le visage du jeu."], ["FOCUS JOUEUR", "Les jeunes talents qui prennent une nouvelle dimension", "Tour d'horizon des progressions à surveiller."], ["DANS LA LIGUE", "La course aux premières places est lancée", "Les premières tendances de la saison se dessinent."]];
 
@@ -319,25 +319,32 @@ function sortRows(players, starters) {
   return [...played.filter(st), ...played.filter(p => !st(p)).sort((x, y) => y.min - x.min)].map(p => ({ ...p, starter: st(p) }));
 }
 const evalScore = p => (p.pts + p.reb + p.ast + p.stl + p.blk) - ((p.fga - p.fgm) + (p.fta - p.ftm) + p.tov);
-function teamTable(title, score, players, starters) {
+const pctTxt = (m, a) => `${m}/${a} (${a ? Math.round(100 * m / a) : 0}%)`;
+const pmCell = v => `<td class="${v > 0 ? "pm-pos" : v < 0 ? "pm-neg" : "dim"}">${v > 0 ? "+" : ""}${v}</td>`;
+function teamTable(full, score, players, starters, ab, win) {
   const rows = sortRows(players, starters);
   const sum = k => rows.reduce((a, p) => a + p[k], 0);
   const lastStarter = rows.reduce((a, p, i) => p.starter ? i : a, -1);
-  const body = rows.map((p, i) => `<tr class="${i === lastStarter && lastStarter < rows.length - 1 ? "starter-last" : ""}"><td>${esc(p.name)}</td><td>${Math.round(p.min)}</td><td>${p.fgm}/${p.fga}</td><td>${p.tpm}/${p.tpa}</td><td>${p.ftm}/${p.fta}</td><td>${p.oreb}</td><td>${p.dreb}</td><td>${p.reb}</td><td>${p.ast}</td><td>${p.pf}</td><td>${p.stl}</td><td>${p.tov}</td><td>${p.blk}</td><td>${p.pm > 0 ? "+" : ""}${p.pm}</td><td class="col-pts">${p.pts}</td><td>${evalScore(p)}</td></tr>`).join("");
-  const foot = `<tr class="box-total"><td>Total</td><td></td><td>${sum("fgm")}/${sum("fga")}</td><td>${sum("tpm")}/${sum("tpa")}</td><td>${sum("ftm")}/${sum("fta")}</td><td>${sum("oreb")}</td><td>${sum("dreb")}</td><td>${sum("reb")}</td><td>${sum("ast")}</td><td>${sum("pf")}</td><td>${sum("stl")}</td><td>${sum("tov")}</td><td>${sum("blk")}</td><td></td><td class="col-pts">${sum("pts")}</td><td></td></tr>`;
-  return `<h3 class="box-team">${esc(title)} · ${score ?? "—"}</h3><div class="table-wrap"><table class="box"><thead><tr><th>Joueurs</th><th>Min</th><th>Tirs</th><th>3pts</th><th>LF</th><th>O</th><th>D</th><th>T</th><th>Pd</th><th>Fte</th><th>Int</th><th>Bp</th><th>Ct</th><th>+/-</th><th>Pts</th><th>Éval</th></tr></thead><tbody>${body}${foot}</tbody></table></div>`;
+  const body = rows.map((p, i) => `<tr class="${i === lastStarter && lastStarter < rows.length - 1 ? "starter-last" : ""}"><td class="bx-name">${esc(p.name)}${FRENCH.includes(norm(p.name)) ? FLAG : ""}</td><td class="dim">${Math.round(p.min)}</td><td class="strong">${pctTxt(p.fgm, p.fga)}</td><td class="strong">${p.tpm}/${p.tpa}</td><td class="strong">${p.ftm}/${p.fta}</td><td class="dim">${p.oreb}</td><td class="dim">${p.dreb}</td><td class="strong">${p.reb}</td><td class="strong">${p.ast}</td><td class="dim">${p.pf}</td><td class="strong">${p.stl}</td><td class="dim">${p.tov}</td><td class="strong">${p.blk}</td>${pmCell(p.pm)}<td class="col-pts">${p.pts}</td><td class="ev">${evalScore(p)}</td></tr>`).join("");
+  const foot = `<tr class="box-total"><td>Total</td><td class="dim">-</td><td>${pctTxt(sum("fgm"), sum("fga"))}</td><td>${sum("tpm")}/${sum("tpa")}</td><td>${sum("ftm")}/${sum("fta")}</td><td class="dim">${sum("oreb")}</td><td class="dim">${sum("dreb")}</td><td>${sum("reb")}</td><td>${sum("ast")}</td><td class="dim">${sum("pf")}</td><td>${sum("stl")}</td><td class="dim">${sum("tov")}</td><td>${sum("blk")}</td><td class="dim">-</td><td class="col-pts">${sum("pts")}</td><td class="dim">-</td></tr>`;
+  return `<section class="bx-team"><h3><span class="bx-badge" style="--c:${TEAM_COLOR[ab] || "#7a8699"}">${esc(ab)}</span><span class="bx-tn">${esc(full)}</span><span class="bx-ts${win ? " win" : ""}">/ ${score ?? "—"}</span></h3><div class="bx-card"><div class="table-wrap"><table class="box"><thead><tr><th>Joueurs</th><th>Min</th><th>Tirs</th><th>3pts</th><th>LF</th><th>O</th><th>D</th><th>T</th><th>Pd</th><th>Fte</th><th>Int</th><th>Bp</th><th>Ct</th><th>+/-</th><th class="col-pts">Pts</th><th class="ev">Éval</th></tr></thead><tbody>${body}${foot}</tbody></table></div></div></section>`;
 }
 function quarterTable(g, m) {
   const sc = (m.state && m.state.score) || {}, a = sc.awayTeam || [], h = sc.homeTeam || [];
   if (!a.length) return "";
-  const head = a.map((_, i) => `<th>${i < 4 ? "Q" + (i + 1) : "PR" + (i > 4 ? i - 3 : "")}</th>`).join("");
-  const row = (n, arr) => `<tr><td class="team-pair">${esc(n)}</td>${arr.map(v => `<td>${v}</td>`).join("")}<td class="col-pts">${arr.reduce((x, y) => x + (+y || 0), 0)}</td></tr>`;
-  return `<div class="table-wrap"><table class="box"><thead><tr><th>Score</th>${head}<th>Total</th></tr></thead><tbody>${row(g.away, a)}${row(g.home, h)}</tbody></table></div>`;
+  const head = a.map((_, i) => `<th>${i < 4 ? "QT" + (i + 1) : "PR" + (i > 4 ? i - 3 : "")}</th>`).join("");
+  const row = (n, arr) => `<tr><td><b>${esc(n)}</b></td>${arr.map(v => `<td>${v}</td>`).join("")}<td class="bx-tot">${arr.reduce((x, y) => x + (+y || 0), 0)}</td></tr>`;
+  return `<table class="bx-q"><thead><tr><th>Équipe</th>${head}<th class="bx-toth">TOT</th></tr></thead><tbody>${row(g.away, a)}${row(g.home, h)}</tbody></table>`;
+}
+function boxSummary(g, m, c) {
+  const best = (c.box.home.players.concat(c.box.away.players)).filter(p => p.min > 0).sort((x, y) => y.pts - x.pts)[0];
+  const side = (ab, full, sc, won) => `<span class="bx-side${won ? " won" : ""}">${dot(ab)}${esc(full)} <b>${sc ?? "—"}</b></span>`;
+  return `<div class="bx-sum"><div class="bx-vs">${side(g.away, m.awayTeam.displayName || g.away, g.a, g.a > g.h)}<span class="bx-v">vs</span>${side(g.home, m.homeTeam.displayName || g.home, g.h, g.h > g.a)}</div>${quarterTable(g, m)}</div>${best ? `<p class="bx-best">★ ${esc(shortName(best.name))} : ${best.pts} pts</p>` : ""}`;
 }
 async function openGame(id) {
   const g = findGame(id); if (!g) return;
   const note = $("#match-modal .modal-note"), wrap = $("#match-modal .table-wrap"), token = ++state.modalToken;
-  $("#modal-title").textContent = `${g.away} ${g.a ?? "—"} – ${g.h ?? "—"} ${g.home}`;
+  $("#modal-title").textContent = `${g.final ? "Final" : g.live ? "In progress" : "À venir"} · ${g.away} – ${g.home} · ${fmtLong(g.date)}`;
   wrap.innerHTML = ""; note.textContent = "Chargement de la feuille de match…";
   $("#match-modal").showModal();
   if (!g.final && !g.live) { note.textContent = "Match à venir : la feuille de match sera disponible après la rencontre."; return; }
@@ -348,7 +355,7 @@ async function openGame(id) {
     const starters = await getStarters(g, c);
     if (token !== state.modalToken) return;
     const m = c.match;
-    wrap.innerHTML = quarterTable(g, m) + teamTable(m.awayTeam.displayName || g.away, g.a, c.box.away.players, starters) + teamTable(m.homeTeam.displayName || g.home, g.h, c.box.home.players, starters);
+    wrap.innerHTML = boxSummary(g, m, c) + teamTable(m.awayTeam.displayName || g.away, g.a, c.box.away.players, starters, g.away, g.a > g.h) + teamTable(m.homeTeam.displayName || g.home, g.h, c.box.home.players, starters, g.home, g.h > g.a);
     note.textContent = c.ready ? "Statistiques officielles via Highlightly." : "Feuille de match pas encore complète : les chiffres peuvent évoluer.";
   } catch (e) {
     if (token !== state.modalToken) return;
