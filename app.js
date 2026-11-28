@@ -336,7 +336,7 @@ function quarterTable(g, m) {
 }
 async function openGame(id) {
   const g = findGame(id); if (!g) return;
-  const note = $(".modal-note"), wrap = $("#match-modal .table-wrap"), token = ++state.modalToken;
+  const note = $("#match-modal .modal-note"), wrap = $("#match-modal .table-wrap"), token = ++state.modalToken;
   $("#modal-title").textContent = `${g.away} ${g.a ?? "—"} – ${g.h ?? "—"} ${g.home}`;
   wrap.innerHTML = ""; note.textContent = "Chargement de la feuille de match…";
   $("#match-modal").showModal();
