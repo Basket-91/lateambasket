@@ -287,3 +287,18 @@ td.col-pts{font-weight:900;color:var(--orange)}
 .tc-foot.tc-when .tc-time{font-size:14px;padding:3px 10px}
 .team-grid{grid-auto-rows:1fr}
 .team-card{align-content:space-between}
+
+/* tableau : adapté à la largeur, cartes cliquables */
+.bk-scroll{overflow-x:auto}#bracket{position:relative}
+.bk-card,.bk-gold{cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.bk-card:hover{border-color:var(--orange);box-shadow:0 0 0 3px #ff6a1a33}
+.bk-gold:hover{box-shadow:0 0 0 5px #f5c54240,0 14px 40px #f5c54240}
+.ser-list{display:grid;gap:8px;margin-top:6px}
+.ser-game{display:grid;grid-template-columns:78px 130px 1fr auto;gap:14px;align-items:center;text-align:left;background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:13px 16px;font-size:15.5px}
+.ser-game:hover{border-color:var(--orange)}
+.sg-n{font-weight:800;color:var(--orange2)}.sg-d{color:var(--muted);font-size:14px}
+.sg-m{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-weight:600;color:var(--muted)}
+.sg-m .w{color:var(--text);font-weight:800}.sg-m b{font-variant-numeric:tabular-nums}.sg-m .at{color:var(--muted)}
+.sg-m .dot{margin:0 7px;width:12px;height:12px}
+.sg-go{color:var(--orange2);font-weight:800;font-size:14px;white-space:nowrap}
+@media(max-width:700px){.ser-game{grid-template-columns:1fr;gap:6px}}

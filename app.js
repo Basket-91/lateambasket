@@ -612,7 +612,7 @@ const ROUNDS = ["1er Tour", "Demi-finales de Conférence", "Finales de Conféren
 const bkTeam = (s, id) => `<div class="bk-t${s.winnerId === id ? " win" : ""}">${dot(s.teams[id].abbreviation)}<span>${esc(s.teams[id].name)}</span><b>${s.wins[id]}</b></div>`;
 function bkNode(s, byRT) {
   const kids = s.round > 1 ? s.ids.map(id => byRT.get((s.round - 1) + ":" + id)).filter(Boolean) : [];
-  return `<div class="bk-node">${kids.length ? `<div class="bk-kids">${kids.map(k => `<div class="bk-kid">${bkNode(k, byRT)}</div>`).join("")}</div>` : ""}<div class="bk-card">${bkTeam(s, s.ids[0])}${bkTeam(s, s.ids[1])}</div></div>`;
+  return `<div class="bk-node">${kids.length ? `<div class="bk-kids">${kids.map(k => `<div class="bk-kid">${bkNode(k, byRT)}</div>`).join("")}</div>` : ""}<div class="bk-card" data-series="${s.key}" title="Voir les matchs de la série">${bkTeam(s, s.ids[0])}${bkTeam(s, s.ids[1])}</div></div>`;
 }
 function bracketTree(series, y) {
   const fin = series.filter(s => s.round === 4).sort((a, b) => b.start - a.start)[0];
@@ -624,7 +624,27 @@ function bracketTree(series, y) {
   if (!lr && !rr) return null;
   const done = fin.winnerId != null, champ = done ? fin.teams[fin.winnerId] : null, mvp = done ? FMVP[y] : null;
   const confL = CONF[fin.teams[L].conference] || "", confR = CONF[fin.teams[R].conference] || "";
-  return `<div class="bk-titles"><span>Conférence ${confL}</span><span>Conférence ${confR}</span></div><div class="bk-wrap"><div class="bk-side">${lr ? bkNode(lr, byRT) : ""}</div><div class="bk-link"></div><div class="bk-final"><div class="bk-champ">${done ? "Champions NBA " + y : "Finales NBA " + y}</div>${champ ? `<div class="bk-cn">${esc(champ.full_name)}</div>` : ""}<div class="bk-gold"><small>FINALES NBA</small>${bkTeam(fin, fin.ids[0])}${bkTeam(fin, fin.ids[1])}</div>${mvp ? `<div class="bk-mvp">MVP des finales : <span>${esc(mvp)}</span></div>` : ""}</div><div class="bk-link"></div><div class="bk-side rev">${rr ? bkNode(rr, byRT) : ""}</div></div>`;
+  return `<div class="bk-fit"><div class="bk-titles"><span>Conférence ${confL}</span><span>Conférence ${confR}</span></div><div class="bk-wrap"><div class="bk-side">${lr ? bkNode(lr, byRT) : ""}</div><div class="bk-link"></div><div class="bk-final"><div class="bk-champ">${done ? "Champions NBA " + y : "Finales NBA " + y}</div>${champ ? `<div class="bk-cn">${esc(champ.full_name)}</div>` : ""}<div class="bk-gold" data-series="${fin.key}" title="Voir les matchs de la finale"><small>FINALES NBA</small>${bkTeam(fin, fin.ids[0])}${bkTeam(fin, fin.ids[1])}</div>${mvp ? `<div class="bk-mvp">MVP des finales : <span>${esc(mvp)}</span></div>` : ""}</div><div class="bk-link"></div><div class="bk-side rev">${rr ? bkNode(rr, byRT) : ""}</div></div></div>`;
+}
+/* Adapte le tableau à la largeur disponible (réduction jusqu'à 60 %, défilement horizontal en dessous) */
+function fitBracket() {
+  const box = $("#bracket"), fit = box && box.querySelector(".bk-fit"); if (!fit) return;
+  const wrap = fit.querySelector(".bk-wrap"), avail = box.clientWidth; if (!wrap || !avail) return;
+  fit.style.transform = ""; fit.style.width = ""; fit.style.marginLeft = ""; box.style.height = "";
+  const w = wrap.offsetWidth, k = Math.max(0.6, Math.min(1, avail / w));
+  fit.style.width = w + "px"; fit.style.transformOrigin = "0 0"; fit.style.transform = `scale(${k})`;
+  fit.style.marginLeft = Math.max(0, (avail - w * k) / 2) + "px"; box.style.height = Math.ceil(fit.offsetHeight * k) + "px";
+}
+function openSeries(key) {
+  const s = state.series && state.series.get(key); if (!s) return;
+  const [a, b] = s.ids, A = s.teams[a], B = s.teams[b];
+  $("#series-title").textContent = `${ROUNDS[s.round - 1]} · ${A.full_name} ${s.wins[a]}–${s.wins[b]} ${B.full_name}`;
+  $("#series-note").textContent = (s.winnerId ? `${s.teams[s.winnerId].full_name} remporte la série. ` : "Série en cours. ") + "Clique sur un match pour voir la feuille de match.";
+  $("#series-body").innerHTML = s.games.map((g, i) => {
+    const wn = g.h > g.a ? g.home : g.away;
+    return `<button class="ser-game" data-game="${g.id}"><span class="sg-n">Match ${i + 1}</span><span class="sg-d">${esc(fmtLong(g.date))}</span><span class="sg-m"><span class="${g.a > g.h ? "w" : ""}">${dot(g.away)}${esc(g.away)} <b>${g.a}</b></span><span class="at">@</span><span class="${g.h > g.a ? "w" : ""}"><b>${g.h}</b> ${esc(g.home)}${dot(g.home)}</span></span><span class="sg-go">Feuille de match →</span></button>`;
+  }).join("");
+  $("#series-modal").showModal();
 }
 async function showPlayoffs() {
   const y = +$("#playoff-year").value, token = ++state.playoffToken;
@@ -635,8 +655,10 @@ async function showPlayoffs() {
   catch (e) { if (token === state.playoffToken) $("#bracket").innerHTML = '<div class="empty-state">Playoffs indisponibles pour le moment.</div>'; return; }
   if (token !== state.playoffToken) return;
   const series = buildSeries(games, y);
+  games.forEach(g => state.gameIndex.set(g.id, g)); state.series = new Map(series.map(x => [x.key, x]));
   if (!series.length) { $("#bracket").innerHTML = '<div class="empty-state">Aucune série disponible pour cette édition.</div>'; return; }
   $("#bracket").innerHTML = bracketTree(series, y) || `<div class="bracket">${ROUNDS.map((n, i) => `<div class="bracket-col"><h3>${n}</h3>${series.filter(s => s.round === i + 1).map(s => { const [a, b] = s.ids; return `<div class="bracket-match"><div class="${s.winnerId === a ? "champ" : ""}"><span>${esc(s.teams[a].name)}</span><b>${s.wins[a]}</b></div><div><span>${esc(s.teams[b].name)}</span><b>${s.wins[b]}</b></div></div>`; }).join("") || '<div class="empty-state">—</div>'}</div>`).join("")}</div>`;
+  fitBracket();
   $("#series-detail").innerHTML = [...series].sort((a, b) => b.round - a.round || a.start - b.start).map(s => {
     const [a, b] = s.ids;
     return `<article class="series-card"><h3>${ROUNDS[s.round - 1]} · ${esc(s.teams[a].full_name)} ${s.wins[a]}–${s.wins[b]} ${esc(s.teams[b].full_name)}</h3><p>${s.winnerId ? esc(s.teams[a].full_name) + " remporte la série " + s.wins[a] + "–" + s.wins[b] : "Série en cours"}</p><details><summary>Voir les matchs</summary><ul>${s.games.map((g, i) => `<li>Match ${i + 1} · ${fmtLong(g.date)} · ${esc(g.away)} ${g.a} – ${g.h} ${esc(g.home)}</li>`).join("")}</ul></details></article>`;
@@ -713,6 +735,10 @@ function init() {
   $("#theme-toggle").onclick = () => { document.body.dataset.theme = document.body.dataset.theme === "dark" ? "light" : "dark"; localStorage.setItem("ltb-theme", document.body.dataset.theme); updateThemeButton(); };
   $("#mobile-menu").onclick = () => $(".main-nav").classList.toggle("open");
   $("#modal-close").onclick = () => $("#match-modal").close();
+  $("#series-close").onclick = () => $("#series-modal").close();
+  $("#series-body").addEventListener("click", openFrom);
+  $("#bracket").addEventListener("click", e => { const c = e.target.closest("[data-series]"); if (c) openSeries(c.dataset.series); });
+  window.addEventListener("resize", () => { clearTimeout(state.fitT); state.fitT = setTimeout(fitBracket, 120); });
   $("#all-news").onclick = () => alert("La rubrique actualités sera enrichie lors de la prochaine étape.");
   $("#news-grid").addEventListener("click", e => { if (e.target.closest("[data-news]")) alert("Article de démonstration : le système de publication sera ajouté ultérieurement."); });
 }
